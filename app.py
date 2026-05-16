@@ -34,6 +34,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Proteções anti-crawler: pede a Google/Bing pra NÃO indexar (mitigação extra
+# além da senha. Streamlit Cloud não permite robots.txt custom, então usamos
+# meta tags via st.markdown).
+st.markdown(
+    """
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+    <meta name="googlebot" content="noindex,nofollow,noarchive,nosnippet">
+    <meta name="bingbot" content="noindex,nofollow,noarchive,nosnippet">
+    """,
+    unsafe_allow_html=True,
+)
+
 # Tenta carregar .env localmente; em produção usa st.secrets
 try:
     from dotenv import load_dotenv
