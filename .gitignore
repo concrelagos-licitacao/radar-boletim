@@ -1,0 +1,23 @@
+.env
+credenciais/
+logs/
+output/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.idea/
+.vscode/
+.claude/
+
+# Streamlit secrets reais (NÃO commitar — usar secrets.toml.example como template)
+.streamlit/secrets.toml
+
+# Arquivos jurídicos sensíveis (PDFs de contrato social etc.)
+EMPRESAS/*.pdf
+
+# Markdown auto-gerados de PDFs (se reaparecerem)
+*.md
+!DEPLOY.md
+!README.md

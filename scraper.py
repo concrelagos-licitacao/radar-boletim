@@ -1,0 +1,687 @@
+"""
+Concrelagos Intelligence Hub — scraper.py
+=========================================
+Pipeline diário (Fases 1+2+3 do escopo arquitetural):
+  1) Lê filiais (usinas e pedreiras) do Google Sheets.
+  2) Busca editais publicados no PNCP na janela configurada.
+  3) Filtra por palavra-chave, estado e valor mínimo.
+  4) Qualifica por distância (Nominatim para geocoding + Haversine para distância)
+     contra usinas (<= 70 km) e, para brita acima de R$ 200k, pedreiras (<= 700 km).
+  5) Grava os qualificados na aba 'Novas Licitações' do mesmo Sheets.
+
+Toda credencial vem do .env — nada hardcoded.
+
+GEOCODING / DISTÂNCIA:
+  - Geocoding via Nominatim (OpenStreetMap) — gratuito, rate-limit 1 req/s.
+  - Distância via fórmula de Haversine (linha reta) — sem custo de API.
+  - Como linha reta subestima distância de estrada, aplicamos
+    HAVERSINE_AJUSTE_FATOR (padrão 1.0 = sem ajuste). Para ser mais
+    conservador (descartar mais editais), aumente para 1.2-1.3.
+"""
+
+from __future__ import annotations
+
+import csv
+import logging
+import os
+import sys
+import time
+import unicodedata
+from datetime import date, datetime, timedelta
+from math import asin, cos, radians, sin, sqrt
+from pathlib import Path
+from typing import Iterable
+
+import gspread
+import requests
+from dotenv import load_dotenv
+from geopy.exc import GeocoderServiceError, GeocoderTimedOut
+from geopy.geocoders import Nominatim
+
+# Carrega .env JÁ no import (antes das constantes lerem os.getenv)
+load_dotenv()
+
+# =========================================================================
+# REGRAS DE NEGÓCIO
+# =========================================================================
+VALOR_MINIMO_GERAL = 180_000.00
+VALOR_MINIMO_PEDREIRA = 200_000.00
+RAIO_USINA_KM = 70
+RAIO_PEDREIRA_KM = 700
+
+ESTADOS_CONCRETO = {"MG", "SP", "ES", "RJ", "PR", "BA"}
+ESTADOS_BRITA = {"RJ"}
+
+# Palavras-chave amplas (todos comparados após _normalize: lower + sem acento).
+# Concreto: variantes técnicas + termos genéricos que podem esconder concreto usinado.
+KEYWORDS_CONCRETO = (
+    "concreto usinado",
+    "concreto pre-misturado",
+    "concreto pre misturado",
+    "concreto dosado",
+    "concreto dosado em central",
+    "concreto preparado",
+    "concreto fck",            # spec técnica frequente (concreto fck 25, 30, etc.)
+    "concreto armado",
+    "concreto comercializado",
+    "concretagem",
+    "fornecimento de concreto",
+    "materiais de construcao", # cobre "materiais de construção" sem acento
+    "material de construcao",
+)
+# Brita: agregados de qualquer tipo, pedras, pedriscos.
+KEYWORDS_BRITA = (
+    "brita",
+    "agregado",                # cobre "agregado graúdo", "agregados", etc.
+    "agregados",
+    "pedrisco",
+    "pedras britadas",
+    "pedra britada",
+    "pedras para construcao",
+    "pedra para construcao",
+    "rachao",                  # "rachão" sem acento (pedra de mão)
+    "pedregulho",
+    "cascalho",
+)
+
+PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+PNCP_TAMANHO_PAGINA = 50    # menor que 500 para evitar timeouts
+PNCP_TIMEOUT_S = int(os.getenv("PNCP_TIMEOUT_S", "60"))
+PNCP_RETRY_COUNT = int(os.getenv("PNCP_RETRY_COUNT", "1"))   # cada página = 1 + retry
+PNCP_MAX_PAGINAS = int(os.getenv("PNCP_MAX_PAGINAS", "5"))    # 5 páginas/modalidade na demo
+# Códigos de modalidade conforme tabela de domínio do PNCP — varremos pregão,
+# concorrência, dispensa, inexigibilidade e leilão, que cobrem o universo
+# relevante para insumos de construção.
+PNCP_MODALIDADES = (6, 4, 8, 9, 1)
+
+ABA_FILIAIS = "Filiais"
+ABA_OUTPUT = "Novas Licitações"
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+LOG_DIR = PROJECT_ROOT / "logs"
+OUTPUT_FALLBACK_DIR = PROJECT_ROOT / "output"
+
+# Geocoding / distância (sem Google Maps)
+NOMINATIM_USER_AGENT = "concrelagos-intelligence-hub/1.0 (juridico@concrelagos.com.br)"
+NOMINATIM_RATE_LIMIT_SEC = 1.1  # política Nominatim
+HAVERSINE_AJUSTE_FATOR = float(os.getenv("HAVERSINE_AJUSTE_FATOR", "1.0"))
+
+OUTPUT_HEADER = [
+    "data_execucao",
+    "numero_controle_pncp",
+    "numero_edital",          # ex: "PE/0006/2025" ou "DL/0264/2026"
+    "modalidade",             # ex: "Pregão Eletrônico" ou "Dispensa"
+    "orgao",
+    "esfera",                 # F/E/M (Federal/Estadual/Municipal)
+    "municipio",
+    "uf",
+    "objeto",
+    "valor_estimado",
+    "data_abertura",
+    "data_encerramento",
+    "material",
+    "tipo_atendimento",
+    "filial_mais_proxima",
+    "distancia_km",
+    "link_pncp",              # página oficial PNCP do edital
+    "link_sistema_origem",    # link sistema do órgão (comprasnet, etc.)
+]
+
+# Mapeamento de modalidade PNCP → sigla e nome
+MODALIDADE_SIGLA = {
+    1: "LE",   # Leilão Eletrônico
+    2: "DA",   # Diálogo Competitivo
+    3: "CO",   # Concorrência (Eletrônica)
+    4: "CO",   # Concorrência (Presencial)
+    5: "PE",   # Pregão (Presencial)
+    6: "PE",   # Pregão Eletrônico
+    7: "CP",   # Concurso
+    8: "DL",   # Dispensa de Licitação
+    9: "IL",   # Inexigibilidade
+    10: "MR",  # Manifestação de Interesse
+    11: "PC",  # Pré-qualificação
+    12: "CC",  # Credenciamento
+    13: "LI",  # Licitação Internacional
+}
+MODALIDADE_NOME = {
+    1: "Leilão Eletrônico",
+    2: "Diálogo Competitivo",
+    3: "Concorrência Eletrônica",
+    4: "Concorrência",
+    5: "Pregão Presencial",
+    6: "Pregão Eletrônico",
+    7: "Concurso",
+    8: "Dispensa de Licitação",
+    9: "Inexigibilidade",
+    10: "Manifestação de Interesse",
+    11: "Pré-qualificação",
+    12: "Credenciamento",
+    13: "Licitação Internacional",
+}
+ESFERA_NOME = {"F": "Federal", "E": "Estadual", "M": "Municipal", "D": "Distrital"}
+
+
+# =========================================================================
+# LOGGING
+# =========================================================================
+def _configurar_logging() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    arquivo_log = LOG_DIR / f"scraper_{date.today().isoformat()}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(arquivo_log, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+# =========================================================================
+# UTILITÁRIOS
+# =========================================================================
+def _normalize(texto: str | None) -> str:
+    if not texto:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texto))
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
+
+
+def _validar_env() -> None:
+    obrigatorias = ("GOOGLE_SHEETS_ID", "GOOGLE_SHEETS_CREDENTIALS_PATH")
+    faltando = [k for k in obrigatorias if not os.getenv(k)]
+    if faltando:
+        logging.error(
+            "Variáveis de ambiente obrigatórias ausentes no .env: %s",
+            ", ".join(faltando),
+        )
+        sys.exit(1)
+    caminho_cred = os.environ["GOOGLE_SHEETS_CREDENTIALS_PATH"]
+    if not Path(caminho_cred).is_file():
+        logging.error("Arquivo de credencial não encontrado em %s", caminho_cred)
+        sys.exit(1)
+
+
+def _haversine_km(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Distância em linha reta entre dois pontos (lat, lng) em quilômetros."""
+    lat1, lng1 = map(radians, p1)
+    lat2, lng2 = map(radians, p2)
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    R = 6371.0  # raio da Terra em km
+    return R * c * HAVERSINE_AJUSTE_FATOR
+
+
+# =========================================================================
+# FASE 1 — CARGA DE FILIAIS DO GOOGLE SHEETS
+# =========================================================================
+def carregar_filiais(sheet_id: str) -> dict[str, list[dict]]:
+    """Lê a aba 'Filiais' e retorna {'usinas': [...], 'pedreiras': [...]}.
+
+    Colunas esperadas (header na linha 1):
+      nome | sigla | municipio | uf | latitude | longitude | tipo
+    Onde tipo ∈ {"usina", "pedreira"}.
+    """
+    try:
+        gc = gspread.service_account(filename=os.environ["GOOGLE_SHEETS_CREDENTIALS_PATH"])
+        planilha = gc.open_by_key(sheet_id)
+        aba = planilha.worksheet(ABA_FILIAIS)
+    except gspread.exceptions.SpreadsheetNotFound:
+        logging.error("Planilha %s não encontrada (verifique o ID e o compartilhamento com a Service Account).", sheet_id)
+        sys.exit(1)
+    except gspread.exceptions.WorksheetNotFound:
+        logging.error("Aba '%s' não existe na planilha.", ABA_FILIAIS)
+        sys.exit(1)
+    except gspread.exceptions.APIError as e:
+        logging.error("Erro de API ao abrir a planilha: %s", e)
+        sys.exit(1)
+
+    # get_all_values mantém tudo como string (evita o gspread "numericise" automático
+    # que transforma "-23,3112878" do locale BR em int -233112878).
+    todas = aba.get_all_values()
+    if not todas:
+        logging.error("Aba '%s' está vazia.", ABA_FILIAIS)
+        sys.exit(1)
+    header = [h.strip() for h in todas[0]]
+    linhas = [dict(zip(header, row)) for row in todas[1:]]
+
+    usinas: list[dict] = []
+    pedreiras: list[dict] = []
+
+    def _parse_coord(s: str) -> float | None:
+        if s is None:
+            return None
+        s = str(s).strip().replace(",", ".")
+        if not s:
+            return None
+        # Detecta inteiros gigantes (sem ponto decimal salvo errado no Sheets)
+        # ex: "-233112878" → insere ponto após o sinal e 2 dígitos: "-23.3112878"
+        if "." not in s:
+            try:
+                n = int(s)
+                # Se valor absoluto > 90, certamente é coordenada sem ponto
+                if abs(n) > 90:
+                    sign = "-" if n < 0 else ""
+                    digits = str(abs(n))
+                    # Coordenadas brasileiras: lat -33..5, lng -73..-34
+                    # Insere ponto após 2 dígitos
+                    if len(digits) > 2:
+                        s = f"{sign}{digits[:2]}.{digits[2:]}"
+                    else:
+                        return None
+            except ValueError:
+                pass
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    for i, linha in enumerate(linhas, start=2):  # linha 1 = header
+        lat = _parse_coord(linha.get("latitude", ""))
+        lng = _parse_coord(linha.get("longitude", ""))
+        if lat is None or lng is None:
+            logging.warning("Filial linha %d ignorada: latitude/longitude inválidas (%r/%r).",
+                            i, linha.get("latitude"), linha.get("longitude"))
+            continue
+
+        # Descarta linhas com coordenada (0, 0) — indicador de geocoding falho.
+        if lat == 0.0 and lng == 0.0:
+            logging.warning("Filial linha %d ignorada: coordenada (0,0) indica geocoding falho.", i)
+            continue
+
+        tipo = _normalize(linha.get("tipo"))
+        filial = {
+            "nome": linha.get("nome") or "",
+            "sigla": linha.get("sigla") or "",
+            "municipio": linha.get("municipio") or "",
+            "uf": (linha.get("uf") or "").upper().strip(),
+            "lat": lat,
+            "lng": lng,
+            "tipo": tipo,
+        }
+        if tipo == "usina":
+            usinas.append(filial)
+        elif tipo == "pedreira":
+            pedreiras.append(filial)
+        else:
+            logging.warning("Filial linha %d ignorada: tipo desconhecido %r.", i, linha.get("tipo"))
+
+    logging.info("Filiais carregadas: %d usinas, %d pedreiras.", len(usinas), len(pedreiras))
+    if not usinas and not pedreiras:
+        logging.error("Nenhuma filial válida na planilha — abortando.")
+        sys.exit(1)
+    return {"usinas": usinas, "pedreiras": pedreiras}
+
+
+# =========================================================================
+# FASE 2 — BUSCA NO PNCP
+# =========================================================================
+def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
+    """Consulta o endpoint público de contratações publicadas no PNCP.
+
+    Pagina automaticamente e varre as modalidades em PNCP_MODALIDADES.
+    Falhas de rede são logadas, mas o que já foi coletado é preservado.
+    """
+    coletados: list[dict] = []
+
+    for modalidade in PNCP_MODALIDADES:
+        pagina = 1
+        while True:
+            params = {
+                "dataInicial": data_inicial.strftime("%Y%m%d"),
+                "dataFinal": data_final.strftime("%Y%m%d"),
+                "codigoModalidadeContratacao": modalidade,
+                "pagina": pagina,
+                "tamanhoPagina": PNCP_TAMANHO_PAGINA,
+            }
+            payload = _pncp_get_com_retry(params, modalidade, pagina)
+            if payload is None:
+                break
+
+            itens = payload.get("data") or []
+            for item in itens:
+                try:
+                    coletados.append(_extrair_edital(item))
+                except (KeyError, TypeError) as e:
+                    logging.debug("Edital descartado por estrutura incompleta: %s", e)
+                    continue
+
+            total_paginas = payload.get("totalPaginas") or 1
+            if pagina >= total_paginas or not itens:
+                break
+            if pagina >= PNCP_MAX_PAGINAS:
+                logging.info("PNCP_MAX_PAGINAS (%d) atingido para modalidade %d — interrompendo varredura.",
+                             PNCP_MAX_PAGINAS, modalidade)
+                break
+            pagina += 1
+
+    logging.info("PNCP retornou %d editais (bruto) na janela %s a %s.",
+                 len(coletados), data_inicial, data_final)
+    return coletados
+
+
+def _pncp_get_com_retry(params: dict, modalidade: int, pagina: int) -> dict | None:
+    """GET no PNCP com retry exponencial. Retorna payload JSON ou None se falhar."""
+    for tentativa in range(PNCP_RETRY_COUNT + 1):
+        try:
+            resp = requests.get(PNCP_BASE_URL, params=params, timeout=PNCP_TIMEOUT_S)
+            if resp.status_code == 204:  # No Content
+                return {"data": [], "totalPaginas": 0}
+            resp.raise_for_status()
+            return resp.json()
+        except requests.Timeout:
+            logging.warning("PNCP timeout (modalidade=%s pagina=%s tentativa=%s/%s)",
+                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 422:
+                # 422 = Unprocessable: parâmetros inválidos para essa modalidade nessa janela
+                logging.info("PNCP modalidade %s sem dados na janela (HTTP 422).", modalidade)
+                return None
+            logging.warning("PNCP HTTP erro (modalidade=%s pagina=%s tentativa=%s/%s): %s",
+                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1, e)
+            if e.response is not None and e.response.status_code < 500:
+                return None  # 4xx: não vale a pena retry
+        except requests.RequestException as e:
+            logging.warning("PNCP erro de rede (modalidade=%s pagina=%s tentativa=%s/%s): %s",
+                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1, e)
+        except ValueError as e:
+            logging.warning("PNCP JSON inválido (modalidade=%s pagina=%s): %s", modalidade, pagina, e)
+            return None
+        if tentativa < PNCP_RETRY_COUNT:
+            time.sleep(2 ** tentativa)  # backoff: 1s, 2s
+    return None
+
+
+def _extrair_edital(item: dict) -> dict:
+    unidade = item.get("unidadeOrgao") or {}
+    orgao = item.get("orgaoEntidade") or {}
+    valor = item.get("valorTotalEstimado")
+
+    codigo_modalidade = item.get("modalidadeId") or item.get("codigoModalidadeContratacao")
+    sigla_mod = MODALIDADE_SIGLA.get(int(codigo_modalidade), "") if codigo_modalidade else ""
+    nome_mod = MODALIDADE_NOME.get(int(codigo_modalidade), "") if codigo_modalidade else ""
+
+    ano = item.get("anoCompra") or ""
+    seq = item.get("sequencialCompra") or ""
+    numero_compra = item.get("numeroCompra") or ""
+
+    # Edital formatado: "PE/0006/2025"
+    numero_edital = ""
+    if sigla_mod and numero_compra and ano:
+        numero_edital = f"{sigla_mod}/{numero_compra}/{ano}"
+    elif numero_compra and ano:
+        numero_edital = f"{numero_compra}/{ano}"
+
+    # Link oficial PNCP da página do edital (formato canônico)
+    cnpj = orgao.get("cnpj") or ""
+    link_pncp_pagina = ""
+    if cnpj and ano and seq:
+        link_pncp_pagina = f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"
+
+    return {
+        "numero_controle_pncp": item.get("numeroControlePNCP") or "",
+        "numero_edital": numero_edital,
+        "modalidade": nome_mod,
+        "orgao": orgao.get("razaoSocial") or "",
+        "esfera": ESFERA_NOME.get((orgao.get("esferaId") or "").upper(), orgao.get("esferaId") or ""),
+        "municipio": unidade.get("municipioNome") or "",
+        "uf": (unidade.get("ufSigla") or "").upper(),
+        "objeto": item.get("objetoCompra") or "",
+        "valor_estimado": float(valor) if valor is not None else 0.0,
+        "data_abertura": item.get("dataAberturaProposta") or "",
+        "data_encerramento": item.get("dataEncerramentoProposta") or "",
+        "link_pncp": link_pncp_pagina,
+        "link_sistema_origem": item.get("linkSistemaOrigem") or "",
+    }
+
+
+# =========================================================================
+# FASE 2 — FILTROS DE KEYWORD, ESTADO E VALOR
+# =========================================================================
+def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
+    sobreviventes: list[dict] = []
+    for ed in editais:
+        if ed["valor_estimado"] < VALOR_MINIMO_GERAL:
+            continue
+        objeto_norm = _normalize(ed["objeto"])
+        uf = ed["uf"]
+
+        eh_concreto = uf in ESTADOS_CONCRETO and any(k in objeto_norm for k in KEYWORDS_CONCRETO)
+        eh_brita = uf in ESTADOS_BRITA and any(k in objeto_norm for k in KEYWORDS_BRITA)
+
+        if eh_concreto:
+            ed["material"] = "concreto"
+            sobreviventes.append(ed)
+        elif eh_brita:
+            ed["material"] = "brita"
+            sobreviventes.append(ed)
+    logging.info("%d editais após filtro keyword/estado/valor.", len(sobreviventes))
+    return sobreviventes
+
+
+# =========================================================================
+# FASE 3 — QUALIFICAÇÃO GEOGRÁFICA (Nominatim + Haversine)
+# =========================================================================
+def qualificar_por_distancia(
+    editais: list[dict],
+    filiais: dict[str, list[dict]],
+) -> list[dict]:
+    """Mantém apenas editais dentro do raio de pelo menos uma filial.
+
+    Geocoding: Nominatim (OSM), rate-limit 1s entre chamadas, cache por município|UF.
+    Distância: fórmula de Haversine (linha reta) com fator de ajuste configurável.
+    """
+    geocoder = Nominatim(user_agent=NOMINATIM_USER_AGENT, timeout=20)
+    geocode_cache: dict[str, tuple[float, float] | None] = {}
+    qualificados: list[dict] = []
+
+    usinas = filiais.get("usinas") or []
+    pedreiras = filiais.get("pedreiras") or []
+
+    for ed in editais:
+        chave_geo = f"{_normalize(ed['municipio'])}|{ed['uf']}"
+
+        if chave_geo in geocode_cache:
+            origem = geocode_cache[chave_geo]
+        else:
+            origem = _geocodificar_municipio(geocoder, ed["municipio"], ed["uf"])
+            geocode_cache[chave_geo] = origem
+
+        if origem is None:
+            logging.warning("Geocode não retornou coordenada para %s/%s — edital descartado.",
+                            ed["municipio"], ed["uf"])
+            continue
+
+        # 1) Tenta usinas
+        if usinas:
+            distancia_km, mais_proxima = _menor_distancia(origem, usinas)
+            if distancia_km is not None and distancia_km <= RAIO_USINA_KM:
+                ed["tipo_atendimento"] = "atendimento_usina"
+                ed["filial_mais_proxima"] = f"{mais_proxima['nome']} ({mais_proxima['municipio']}/{mais_proxima['uf']})"
+                ed["distancia_km"] = round(distancia_km, 2)
+                ed["latitude"] = origem[0]
+                ed["longitude"] = origem[1]
+                qualificados.append(ed)
+                continue
+
+        # 2) Tenta pedreiras (somente para brita acima do limiar)
+        if (
+            pedreiras
+            and ed.get("material") == "brita"
+            and ed["valor_estimado"] > VALOR_MINIMO_PEDREIRA
+        ):
+            distancia_km, mais_proxima = _menor_distancia(origem, pedreiras)
+            if distancia_km is not None and distancia_km <= RAIO_PEDREIRA_KM:
+                ed["tipo_atendimento"] = "atendimento_pedreira"
+                ed["filial_mais_proxima"] = f"{mais_proxima['nome']} ({mais_proxima['municipio']}/{mais_proxima['uf']})"
+                ed["distancia_km"] = round(distancia_km, 2)
+                ed["latitude"] = origem[0]
+                ed["longitude"] = origem[1]
+                qualificados.append(ed)
+                continue
+
+        # Fora dos raios — descartado da memória.
+
+    logging.info("%d editais qualificados após filtro geográfico.", len(qualificados))
+    return qualificados
+
+
+def _geocodificar_municipio(geocoder: Nominatim, municipio: str, uf: str) -> tuple[float, float] | None:
+    consulta = f"{municipio}, {uf}, Brasil"
+    try:
+        time.sleep(NOMINATIM_RATE_LIMIT_SEC)
+        loc = geocoder.geocode(consulta, country_codes=["br"], language="pt-BR")
+        if loc:
+            return (float(loc.latitude), float(loc.longitude))
+    except (GeocoderServiceError, GeocoderTimedOut) as exc:
+        logging.warning("Nominatim erro para '%s': %s", consulta, exc)
+    except Exception as exc:
+        logging.error("Nominatim exceção inesperada para '%s': %s", consulta, exc)
+    return None
+
+
+def _menor_distancia(
+    origem: tuple[float, float],
+    destinos: Iterable[dict],
+) -> tuple[float | None, dict | None]:
+    """Calcula distância haversine de origem a cada destino. Retorna o mais próximo."""
+    melhor_km: float | None = None
+    melhor_destino: dict | None = None
+    for d in destinos:
+        coords = (d["lat"], d["lng"])
+        km = _haversine_km(origem, coords)
+        if melhor_km is None or km < melhor_km:
+            melhor_km = km
+            melhor_destino = d
+    return melhor_km, melhor_destino
+
+
+# =========================================================================
+# FASE 1 — GRAVAÇÃO NA ABA 'Novas Licitações'
+# =========================================================================
+def gravar_em_sheets(qualificados: list[dict], sheet_id: str) -> None:
+    if not qualificados:
+        logging.info("Nada para gravar — 0 editais qualificados.")
+        return
+
+    try:
+        gc = gspread.service_account(filename=os.environ["GOOGLE_SHEETS_CREDENTIALS_PATH"])
+        planilha = gc.open_by_key(sheet_id)
+        try:
+            aba = planilha.worksheet(ABA_OUTPUT)
+        except gspread.exceptions.WorksheetNotFound:
+            logging.info("Aba '%s' não existe — criando.", ABA_OUTPUT)
+            aba = planilha.add_worksheet(title=ABA_OUTPUT, rows=1000, cols=len(OUTPUT_HEADER))
+
+        valores_existentes = aba.get_all_values()
+        # Considera "vazio" se nenhuma célula tem conteúdo real
+        tem_conteudo = any(any(c.strip() for c in row) for row in valores_existentes)
+        primeiro_eh_header = (
+            tem_conteudo
+            and valores_existentes
+            and valores_existentes[0]
+            and valores_existentes[0][0] == OUTPUT_HEADER[0]
+        )
+        if not primeiro_eh_header:
+            # Reseta a aba e escreve o header certo
+            aba.clear()
+            aba.append_row(OUTPUT_HEADER, value_input_option="USER_ENTERED")
+            ja_gravados: set[str] = set()
+        else:
+            header_atual = valores_existentes[0]
+            try:
+                idx_pncp = header_atual.index("numero_controle_pncp")
+                ja_gravados = {row[idx_pncp] for row in valores_existentes[1:] if len(row) > idx_pncp}
+            except ValueError:
+                ja_gravados = set()
+
+        agora = datetime.now().isoformat(timespec="seconds")
+        novas_linhas = [
+            _edital_para_linha(ed, agora) for ed in qualificados
+            if ed["numero_controle_pncp"] not in ja_gravados
+        ]
+        if not novas_linhas:
+            logging.info("Todos os qualificados já estavam na planilha (anti-duplicata).")
+            return
+
+        aba.append_rows(novas_linhas, value_input_option="USER_ENTERED")
+        logging.info("Gravadas %d novas linhas na aba '%s'.", len(novas_linhas), ABA_OUTPUT)
+
+    except gspread.exceptions.APIError as e:
+        logging.error("Falha ao gravar no Sheets: %s — escrevendo fallback CSV.", e)
+        _fallback_csv(qualificados)
+
+
+def _edital_para_linha(ed: dict, ts: str) -> list:
+    return [
+        ts,
+        ed.get("numero_controle_pncp", ""),
+        ed.get("numero_edital", ""),
+        ed.get("modalidade", ""),
+        ed.get("orgao", ""),
+        ed.get("esfera", ""),
+        ed.get("municipio", ""),
+        ed.get("uf", ""),
+        ed.get("objeto", ""),
+        ed.get("valor_estimado", 0.0),
+        ed.get("data_abertura", ""),
+        ed.get("data_encerramento", ""),
+        ed.get("material", ""),
+        ed.get("tipo_atendimento", ""),
+        ed.get("filial_mais_proxima", ""),
+        ed.get("distancia_km", ""),
+        ed.get("link_pncp", ""),
+        ed.get("link_sistema_origem", ""),
+    ]
+
+
+def _fallback_csv(qualificados: list[dict]) -> None:
+    OUTPUT_FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
+    arq = OUTPUT_FALLBACK_DIR / f"novas_licitacoes_fallback_{datetime.now():%Y%m%dT%H%M%S}.csv"
+    ts = datetime.now().isoformat(timespec="seconds")
+    with arq.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(OUTPUT_HEADER)
+        for ed in qualificados:
+            w.writerow(_edital_para_linha(ed, ts))
+    logging.error("Fallback gravado em %s — verifique conectividade e re-execute.", arq)
+
+
+# =========================================================================
+# ORQUESTRADOR
+# =========================================================================
+def main() -> None:
+    _configurar_logging()
+    load_dotenv()
+    _validar_env()
+
+    # Janela: aceita PNCP_DATA_INICIAL/PNCP_DATA_FINAL como override (formato YYYY-MM-DD)
+    # ou cai no padrão JANELA_DIAS (D-N até hoje).
+    di_str = os.getenv("PNCP_DATA_INICIAL", "").strip()
+    df_str = os.getenv("PNCP_DATA_FINAL", "").strip()
+    if di_str and df_str:
+        data_inicial = date.fromisoformat(di_str)
+        data_final = date.fromisoformat(df_str)
+        logging.info("Janela FIXA configurada via .env: %s a %s.", data_inicial, data_final)
+    else:
+        janela = int(os.getenv("JANELA_DIAS", "1"))
+        hoje = date.today()
+        data_inicial = hoje - timedelta(days=janela)
+        data_final = hoje
+        logging.info("Janela relativa (JANELA_DIAS=%d): %s a %s.", janela, data_inicial, data_final)
+
+    sheet_id = os.environ["GOOGLE_SHEETS_ID"]
+    filiais = carregar_filiais(sheet_id)
+
+    brutos = buscar_editais_pncp(data_inicial, data_final)
+    pre = filtrar_por_keyword_estado_valor(brutos)
+    qualificados = qualificar_por_distancia(pre, filiais)
+    gravar_em_sheets(qualificados, sheet_id)
+
+    logging.info("Execução concluída — %d editais qualificados.", len(qualificados))
+
+
+if __name__ == "__main__":
+    main()
