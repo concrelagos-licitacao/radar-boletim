@@ -847,9 +847,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         if "data_execucao" in df.columns:
             df = df.sort_values("data_execucao", ascending=False)
 
-    st.caption(f"**{len(df)}** editais encontrados")
-
     if modo == "Tabela":
+        st.caption(f"**{len(df)}** editais encontrados")
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.download_button(
             "📥 Baixar CSV", data=df.to_csv(index=False).encode("utf-8"),
@@ -857,8 +856,32 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         )
         return
 
+    # ----- Paginação -----
+    _POR_PAGINA = 20
+    _chave_filtro = f"{busca}|{ordem}"
+    if st.session_state.get("_editais_chave_filtro") != _chave_filtro:
+        st.session_state["_editais_chave_filtro"] = _chave_filtro
+        st.session_state["page_editais"] = 0
+
+    total = len(df)
+    n_paginas = max(1, (total + _POR_PAGINA - 1) // _POR_PAGINA)
+    pagina = min(st.session_state.get("page_editais", 0), n_paginas - 1)
+    start = pagina * _POR_PAGINA
+    end   = min(start + _POR_PAGINA, total)
+    df_page = df.iloc[start:end]
+
+    if total == 0:
+        st.caption("Nenhum edital encontrado.")
+    elif n_paginas == 1:
+        st.caption(f"**{total}** edital(is) encontrado(s)")
+    else:
+        st.caption(
+            f"**{total}** edital(is) encontrado(s) — "
+            f"mostrando {start + 1}–{end} · página {pagina + 1} de {n_paginas}"
+        )
+
     # ----- Cards estilo ConLicitação -----
-    for idx, row in enumerate(df.itertuples(index=False), start=1):
+    for idx, row in enumerate(df_page.itertuples(index=False), start=start + 1):
         d = row._asdict()
         urgente = _eh_urgente(d.get("data_abertura"))
         objeto = (d.get("objeto") or "").strip() or "(sem descrição)"
@@ -987,6 +1010,27 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             )
 
         st.markdown('<div style="margin-bottom:0.5rem;"></div>', unsafe_allow_html=True)
+
+    # ----- Navegação de páginas -----
+    if n_paginas > 1:
+        st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+        nav1, nav2, nav3 = st.columns([1, 2, 1])
+        with nav1:
+            if pagina > 0:
+                if st.button("← Anterior", use_container_width=True):
+                    st.session_state["page_editais"] = pagina - 1
+                    st.rerun()
+        with nav2:
+            st.markdown(
+                f'<p style="text-align:center;color:#6B7280;font-size:0.85rem;margin:0.5rem 0;">'
+                f'Página <b>{pagina + 1}</b> de <b>{n_paginas}</b></p>',
+                unsafe_allow_html=True,
+            )
+        with nav3:
+            if pagina < n_paginas - 1:
+                if st.button("Próxima →", use_container_width=True):
+                    st.session_state["page_editais"] = pagina + 1
+                    st.rerun()
 
 
 def _aba_filiais(fil: pd.DataFrame) -> None:
