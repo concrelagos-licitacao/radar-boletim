@@ -368,19 +368,24 @@ def _build_gspread_client():
     st.stop()
 
 
-def _anthropic_client():
-    """Retorna cliente Anthropic. Lê chave de st.secrets ou variável de ambiente."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+def _gemini_client():
+    """Retorna modelo Gemini configurado. Lê chave de st.secrets ou variável de ambiente.
+
+    Usa gemini-1.5-flash — gratuito (15 req/min, 1M tokens/dia no tier Free).
+    Chave obtida em https://aistudio.google.com/app/apikey (projeto concrelagos-hub).
+    """
+    key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         try:
-            key = st.secrets["anthropic"]["api_key"]
+            key = st.secrets["gemini"]["api_key"]
         except Exception:
             pass
     if not key:
         return None
     try:
-        import anthropic
-        return anthropic.Anthropic(api_key=key)
+        import google.generativeai as genai
+        genai.configure(api_key=key)
+        return genai.GenerativeModel("gemini-1.5-flash")
     except ImportError:
         return None
 
@@ -523,10 +528,10 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         cached["exigencias_tecnicas"] = [e.strip() for e in exig_raw.split(";") if e.strip()]
         return cached
 
-    # 2) Precisa do cliente Anthropic
-    client = _anthropic_client()
-    if client is None:
-        st.error("ANTHROPIC_API_KEY não configurada. Configure em Streamlit → Settings → Secrets.")
+    # 2) Precisa do cliente Gemini (gratuito)
+    model = _gemini_client()
+    if model is None:
+        st.error("GEMINI_API_KEY não configurada. Obtenha grátis em aistudio.google.com/app/apikey e configure em Streamlit → Settings → Secrets → [gemini] api_key.")
         return None
 
     # 3) Tenta baixar o PDF
@@ -560,7 +565,7 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         st.warning("PDF sem texto extraível (provavelmente escaneado). Análise IA não disponível.")
         return None
 
-    # 4) Chama Claude
+    # 4) Chama Gemini (gratuito — gemini-1.5-flash, 15 req/min, 1M tokens/dia)
     prompt = f"""Analise este edital público brasileiro de fornecimento de concreto usinado ou brita.
 Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
 {{
@@ -577,23 +582,20 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
     try:
-        msg = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
+        response = model.generate_content(prompt)
+        raw = response.text.strip()
         # Remove possível bloco markdown ```json ... ```
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
+            raw = raw.rstrip("`").strip()
         resumo = json.loads(raw)
     except json.JSONDecodeError as exc:
-        st.warning(f"Claude retornou JSON inválido: {exc}. Tente novamente.")
+        st.warning(f"Gemini retornou JSON inválido: {exc}. Tente novamente.")
         return None
     except Exception as exc:
-        st.error(f"Erro ao chamar Claude API: {exc}")
+        st.error(f"Erro ao chamar Gemini API: {exc}")
         return None
 
     # 5) Salva no cache e retorna
