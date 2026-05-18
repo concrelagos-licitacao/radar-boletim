@@ -10,3 +10,7 @@ geopy>=2.4              # Nominatim (OpenStreetMap) — fallback gratuito
 streamlit>=1.36
 pandas>=2.0
 pydeck>=0.9
+
+# IA — Resumo de editais via Claude API (Fase 7)
+anthropic>=0.25
+pdfplumber>=0.10

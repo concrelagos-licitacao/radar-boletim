@@ -28,9 +28,12 @@ import sys
 import time
 import unicodedata
 from datetime import date, datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from typing import Iterable
+import smtplib
 
 import gspread
 import requests
@@ -122,6 +125,14 @@ PNCP_MODALIDADES = (6, 4, 8, 9, 1, 3)   # 3 = Concorrência Eletrônica (obras d
 
 ABA_FILIAIS = "Filiais"
 ABA_OUTPUT = "Novas Licitações"
+
+# Notificações por e-mail (stdlib smtplib — sem dependência extra).
+# Configure NOTIFICACAO_EMAIL_DE, NOTIFICACAO_EMAIL_SENHA (App Password Gmail)
+# e NOTIFICACAO_EMAIL_PARA (separados por vírgula) no .env / GitHub Secrets.
+NOTIFICACAO_EMAIL_DE    = ""   # preenchido em runtime via load_dotenv() / Secret
+NOTIFICACAO_EMAIL_SENHA = ""
+NOTIFICACAO_EMAIL_PARA  = ""
+APP_URL = "https://concrelagos-intelligence-viynfmh4nlzrfjdktekn2f.streamlit.app/"
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -711,10 +722,15 @@ def _menor_distancia(
 # =========================================================================
 # FASE 1 — GRAVAÇÃO NA ABA 'Novas Licitações'
 # =========================================================================
-def gravar_em_sheets(qualificados: list[dict], sheet_id: str) -> None:
+def gravar_em_sheets(qualificados: list[dict], sheet_id: str) -> list[dict]:
+    """Grava editais qualificados na aba 'Novas Licitações'.
+
+    Retorna a lista de editais efetivamente novos (anti-duplicata) para que
+    main() possa enviar a notificação de e-mail.
+    """
     if not qualificados:
         logging.info("Nada para gravar — 0 editais qualificados.")
-        return
+        return []
 
     try:
         gc = gspread.service_account(filename=os.environ["GOOGLE_SHEETS_CREDENTIALS_PATH"])
@@ -756,20 +772,23 @@ def gravar_em_sheets(qualificados: list[dict], sheet_id: str) -> None:
                 ja_gravados = set()
 
         agora = datetime.now().isoformat(timespec="seconds")
-        novas_linhas = [
-            _edital_para_linha(ed, agora) for ed in qualificados
+        novos_editais = [
+            ed for ed in qualificados
             if ed["numero_controle_pncp"] not in ja_gravados
         ]
-        if not novas_linhas:
+        if not novos_editais:
             logging.info("Todos os qualificados já estavam na planilha (anti-duplicata).")
-            return
+            return []
 
+        novas_linhas = [_edital_para_linha(ed, agora) for ed in novos_editais]
         aba.append_rows(novas_linhas, value_input_option="USER_ENTERED")
         logging.info("Gravadas %d novas linhas na aba '%s'.", len(novas_linhas), ABA_OUTPUT)
+        return novos_editais
 
     except gspread.exceptions.APIError as e:
         logging.error("Falha ao gravar no Sheets: %s — escrevendo fallback CSV.", e)
         _fallback_csv(qualificados)
+    return []
 
 
 def _edital_para_linha(ed: dict, ts: str) -> list:
@@ -812,6 +831,113 @@ def _fallback_csv(qualificados: list[dict]) -> None:
 
 
 # =========================================================================
+# NOTIFICAÇÕES POR E-MAIL
+# =========================================================================
+def enviar_notificacao_email(novos: list[dict]) -> None:
+    """Envia e-mail HTML com os editais recém-qualificados.
+
+    Usa smtplib (stdlib) + Gmail SMTP. Falha silenciosa: loga o erro e segue.
+    Requer as env vars NOTIFICACAO_EMAIL_DE, NOTIFICACAO_EMAIL_SENHA e
+    NOTIFICACAO_EMAIL_PARA configuradas.
+    """
+    remetente = os.getenv("NOTIFICACAO_EMAIL_DE", "").strip()
+    senha = os.getenv("NOTIFICACAO_EMAIL_SENHA", "").strip()
+    destinatarios_raw = os.getenv("NOTIFICACAO_EMAIL_PARA", "").strip()
+
+    if not (remetente and senha and destinatarios_raw):
+        logging.info("Notificação por e-mail desativada (variáveis NOTIFICACAO_EMAIL_* não configuradas).")
+        return
+    if not novos:
+        return
+
+    destinatarios = [d.strip() for d in destinatarios_raw.split(",") if d.strip()]
+    n = len(novos)
+
+    # ---- Monta o HTML ----
+    _SCORE_STYLE = {
+        3: ("background:#DCFCE7;color:#15803D", "✅ CERTO"),
+        2: ("background:#FEF9C3;color:#854D0E", "⚠️ PROVÁVEL"),
+        1: ("background:#F3F4F6;color:#4B5563",  "🔍 POSSÍVEL"),
+    }
+
+    def _fmt_valor(v) -> str:
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return "—"
+        if v >= 1_000_000:
+            return f"R$ {v/1_000_000:.2f}M"
+        if v >= 1_000:
+            return f"R$ {v/1_000:.1f}k"
+        return f"R$ {v:,.0f}"
+
+    cards_html = ""
+    for ed in novos:
+        score_val = ed.get("score") or 0
+        try:
+            score_val = int(score_val)
+        except (ValueError, TypeError):
+            score_val = 0
+        score_style, score_txt = _SCORE_STYLE.get(score_val, ("background:#F3F4F6;color:#4B5563", ""))
+        objeto = str(ed.get("objeto") or "").strip()[:140]
+        orgao  = str(ed.get("orgao") or "").strip()
+        cidade = f"{ed.get('municipio', '')} / {ed.get('uf', '')}"
+        valor  = _fmt_valor(ed.get("valor_estimado"))
+        link   = str(ed.get("link_pncp") or ed.get("link_sistema_origem") or "").strip()
+        link_html = (
+            f'<a href="{link}" style="color:#1E40AF;font-size:13px;text-decoration:none;">🔍 Ver no PNCP →</a>'
+            if link else ""
+        )
+        cards_html += (
+            f'<div style="border:1px solid #E5E7EB;border-left:4px solid #0E2A47;'
+            f'margin:12px 20px;padding:14px 16px;border-radius:6px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+            f'<span style="{score_style};font-weight:700;font-size:11px;padding:3px 8px;border-radius:3px;">{score_txt}</span>'
+            f'<span style="font-weight:700;color:#0E2A47;font-size:15px;">{valor}</span>'
+            f'</div>'
+            f'<div style="font-size:13px;color:#1F2937;margin-bottom:4px;">{objeto}</div>'
+            f'<div style="font-size:12px;color:#6B7280;margin-bottom:8px;">{orgao} · 📍 {cidade}</div>'
+            f'{link_html}'
+            f'</div>'
+        )
+
+    html = (
+        '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#F7F8FA;margin:0;padding:20px;">'
+        '<div style="max-width:620px;margin:0 auto;background:white;border-radius:8px;overflow:hidden;'
+        'box-shadow:0 2px 8px rgba(0,0,0,0.1);">'
+        '<div style="background:#0E2A47;color:white;padding:20px 24px;">'
+        '<h2 style="margin:0;font-size:18px;">🏗️ Concrelagos Intelligence Hub</h2>'
+        f'<p style="margin:6px 0 0;opacity:0.85;font-size:14px;">'
+        f'{n} novo(s) edital(is) qualificado(s) encontrado(s)</p>'
+        '</div>'
+        + cards_html +
+        f'<div style="background:#F3F4F6;padding:14px 24px;text-align:center;'
+        f'font-size:12px;color:#6B7280;border-top:1px solid #E5E7EB;">'
+        f'Acesse o <a href="{APP_URL}" style="color:#0E2A47;font-weight:600;">dashboard</a> '
+        f'para análise completa, filtros e pipeline de oportunidades.</div>'
+        '</div></body></html>'
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"🏗️ [{n}] novo(s) edital(is) qualificado(s) — Concrelagos Hub"
+    msg["From"] = remetente
+    msg["To"] = ", ".join(destinatarios)
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as srv:
+            srv.ehlo()
+            srv.starttls()
+            srv.login(remetente, senha)
+            srv.sendmail(remetente, destinatarios, msg.as_string())
+        logging.info("Notificação enviada para %s (%d edital(is)).", destinatarios, n)
+    except smtplib.SMTPAuthenticationError:
+        logging.error("Notificação: falha de autenticação SMTP. Verifique NOTIFICACAO_EMAIL_SENHA (use App Password).")
+    except Exception as exc:
+        logging.error("Notificação: erro ao enviar e-mail: %s", exc)
+
+
+# =========================================================================
 # ORQUESTRADOR
 # =========================================================================
 def main() -> None:
@@ -841,9 +967,12 @@ def main() -> None:
     pre = filtrar_por_keyword_estado_valor(brutos)
     pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
     qualificados = qualificar_por_distancia(pre, filiais)
-    gravar_em_sheets(qualificados, sheet_id)
+    novos = gravar_em_sheets(qualificados, sheet_id)
 
-    logging.info("Execução concluída — %d editais qualificados.", len(qualificados))
+    # Notificação por e-mail com os editais realmente novos (anti-duplicata aplicado)
+    enviar_notificacao_email(novos)
+
+    logging.info("Execução concluída — %d editais qualificados, %d novos.", len(qualificados), len(novos))
 
 
 if __name__ == "__main__":

@@ -225,6 +225,27 @@ st.markdown(
         background: #F3F4F6; color: #1F2937;
     }
     .cl-divider { border-top: 1px solid #E5E7EB; margin: 1rem 0; }
+    /* Resumo IA */
+    .cl-ia-box {
+        background: #F0F9FF; border: 1px solid #BAE6FD;
+        border-radius: 6px; padding: 0.9rem 1rem; margin-top: 0.6rem;
+    }
+    .cl-ia-rec-participar { background:#DCFCE7;color:#15803D;font-weight:700;font-size:0.75rem;padding:0.2rem 0.6rem;border-radius:4px; }
+    .cl-ia-rec-analisar   { background:#FEF9C3;color:#854D0E;font-weight:700;font-size:0.75rem;padding:0.2rem 0.6rem;border-radius:4px; }
+    .cl-ia-rec-descartar  { background:#FEE2E2;color:#991B1B;font-weight:700;font-size:0.75rem;padding:0.2rem 0.6rem;border-radius:4px; }
+    /* Pipeline */
+    .cl-pipeline-col {
+        background: #F9FAFB; border: 1px solid #E5E7EB;
+        border-radius: 8px; padding: 0.75rem 0.6rem; min-height: 120px;
+    }
+    .cl-pipeline-col-title {
+        font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--cl-muted); margin-bottom: 0.5rem; text-align: center;
+    }
+    .cl-pipeline-card {
+        background: white; border: 1px solid #E5E7EB; border-radius: 6px;
+        padding: 0.6rem 0.75rem; margin-bottom: 0.4rem; font-size: 0.82rem;
+    }
     .cl-header-bar {
         background: linear-gradient(90deg, var(--cl-primary) 0%, #1E40AF 100%);
         color: white;
@@ -347,6 +368,32 @@ def _build_gspread_client():
     st.stop()
 
 
+def _anthropic_client():
+    """Retorna cliente Anthropic. Lê chave de st.secrets ou variável de ambiente."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        try:
+            key = st.secrets["anthropic"]["api_key"]
+        except Exception:
+            pass
+    if not key:
+        return None
+    try:
+        import anthropic
+        return anthropic.Anthropic(api_key=key)
+    except ImportError:
+        return None
+
+
+def _get_or_create_worksheet(planilha, nome: str, rows: int = 500, cols: int = 20):
+    """Abre ou cria uma aba no Google Sheets."""
+    import gspread
+    try:
+        return planilha.worksheet(nome)
+    except gspread.exceptions.WorksheetNotFound:
+        return planilha.add_worksheet(title=nome, rows=rows, cols=cols)
+
+
 def _get_sheet_id() -> str:
     sid = os.environ.get("GOOGLE_SHEETS_ID")
     if sid:
@@ -404,6 +451,252 @@ def _carregar_dados() -> tuple[pd.DataFrame, pd.DataFrame, datetime | None]:
 
     ultima = ed["data_execucao"].max() if "data_execucao" in ed.columns and not ed.empty else None
     return fil, ed, ultima
+
+
+# ===== Resumo com IA =====
+_RESUMO_HEADER = [
+    "numero_controle_pncp", "data_resumo", "produto_exato", "quantidade",
+    "prazo_entrega", "local_entrega", "exigencias_tecnicas",
+    "recomendacao", "justificativa",
+]
+
+
+def _buscar_resumo_cache(num_controle: str) -> dict | None:
+    """Lê a aba 'Resumos IA' e retorna o dict do resumo se já existir."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Resumos IA", rows=500, cols=len(_RESUMO_HEADER))
+        vals = ws.get_all_values()
+        if len(vals) < 2:
+            return None
+        header = vals[0]
+        for row in vals[1:]:
+            d = dict(zip(header, row))
+            if d.get("numero_controle_pncp") == num_controle:
+                return d
+    except Exception:
+        pass
+    return None
+
+
+def _salvar_resumo_cache(num_controle: str, resumo: dict) -> None:
+    """Salva o resumo na aba 'Resumos IA' do Sheets."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Resumos IA", rows=500, cols=len(_RESUMO_HEADER))
+        vals = ws.get_all_values()
+        # Garante header
+        if not vals or not vals[0] or vals[0][0] != _RESUMO_HEADER[0]:
+            ws.clear()
+            ws.append_row(_RESUMO_HEADER, value_input_option="USER_ENTERED")
+        linha = [
+            num_controle,
+            datetime.now().isoformat(timespec="seconds"),
+            resumo.get("produto_exato", ""),
+            resumo.get("quantidade", ""),
+            resumo.get("prazo_entrega", ""),
+            resumo.get("local_entrega", ""),
+            "; ".join(resumo.get("exigencias_tecnicas") or []),
+            resumo.get("recomendacao", ""),
+            resumo.get("justificativa", ""),
+        ]
+        ws.append_row(linha, value_input_option="USER_ENTERED")
+    except Exception as exc:
+        st.warning(f"Não foi possível salvar o resumo no cache: {exc}")
+
+
+def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | None:
+    """Baixa o PDF do edital e gera um resumo estruturado via Claude.
+
+    Retorna dict com: produto_exato, quantidade, prazo_entrega, local_entrega,
+    exigencias_tecnicas (list), recomendacao, justificativa.
+    Retorna None em caso de erro.
+    """
+    import json
+
+    # 1) Verifica cache
+    cached = _buscar_resumo_cache(num_controle)
+    if cached:
+        exig_raw = cached.get("exigencias_tecnicas", "")
+        cached["exigencias_tecnicas"] = [e.strip() for e in exig_raw.split(";") if e.strip()]
+        return cached
+
+    # 2) Precisa do cliente Anthropic
+    client = _anthropic_client()
+    if client is None:
+        st.error("ANTHROPIC_API_KEY não configurada. Configure em Streamlit → Settings → Secrets.")
+        return None
+
+    # 3) Tenta baixar o PDF
+    url = link_pdf or link_pncp
+    if not url:
+        st.warning("Sem link disponível para baixar o edital.")
+        return None
+
+    texto_edital = ""
+    try:
+        import pdfplumber, io
+        resp = __import__("requests").get(url, timeout=30, allow_redirects=True,
+                                          headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "")
+        if "pdf" in content_type or url.lower().endswith(".pdf"):
+            with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                pages_text = [p.extract_text() or "" for p in pdf.pages[:20]]
+            texto_edital = "\n".join(pages_text).strip()
+        else:
+            # Não é PDF — usa o HTML como texto bruto (limitado)
+            texto_edital = resp.text[:8000]
+    except ImportError:
+        st.error("Instale pdfplumber: `pip install pdfplumber`")
+        return None
+    except Exception as exc:
+        st.warning(f"Não foi possível baixar o edital ({exc}). Tente abrir o link manualmente.")
+        return None
+
+    if not texto_edital or len(texto_edital) < 100:
+        st.warning("PDF sem texto extraível (provavelmente escaneado). Análise IA não disponível.")
+        return None
+
+    # 4) Chama Claude
+    prompt = f"""Analise este edital público brasileiro de fornecimento de concreto usinado ou brita.
+Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
+{{
+  "produto_exato": "produto exato sendo comprado (ex: Concreto Usinado FCK 25 MPa)",
+  "quantidade": "quantidade/volume (ex: 1.200 m³ ou 500 toneladas)",
+  "prazo_entrega": "prazo e forma de entrega (ex: 180 dias corridos, parcelado conforme cronograma)",
+  "local_entrega": "cidade/UF e endereço da obra (ex: Belo Horizonte/MG — Av. X nº Y)",
+  "exigencias_tecnicas": ["lista de requisitos técnicos (FCK, slump, aditivos, normas ABNT, etc.)"],
+  "recomendacao": "PARTICIPAR ou ANALISAR ou DESCARTAR",
+  "justificativa": "1 frase explicando a recomendação"
+}}
+
+Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
+{texto_edital[:10000]}"""
+
+    try:
+        msg = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        # Remove possível bloco markdown ```json ... ```
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        resumo = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        st.warning(f"Claude retornou JSON inválido: {exc}. Tente novamente.")
+        return None
+    except Exception as exc:
+        st.error(f"Erro ao chamar Claude API: {exc}")
+        return None
+
+    # 5) Salva no cache e retorna
+    _salvar_resumo_cache(num_controle, resumo)
+    return resumo
+
+
+# ===== Pipeline =====
+_PIPELINE_STATUS = ["Novo", "Em Análise", "Participando", "Ganhou", "Perdeu", "Desistiu"]
+_PIPELINE_HEADER = [
+    "numero_controle_pncp", "orgao", "municipio", "uf", "valor_estimado",
+    "material", "score_label", "link_pncp",
+    "status", "responsavel", "observacoes", "data_atualizacao",
+]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _carregar_pipeline() -> pd.DataFrame:
+    """Lê a aba 'Pipeline' do Sheets. Cache curto (60s) para refletir mudanças rápidas."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Pipeline", rows=500, cols=len(_PIPELINE_HEADER))
+        vals = ws.get_all_values()
+        if not vals or len(vals) < 2:
+            return pd.DataFrame(columns=_PIPELINE_HEADER)
+        header = [h.strip() for h in vals[0]]
+        rows = [dict(zip(header, r)) for r in vals[1:] if any(c.strip() for c in r)]
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame(columns=_PIPELINE_HEADER)
+
+
+def _adicionar_ao_pipeline(entry: dict) -> bool:
+    """Adiciona um edital à aba Pipeline. Retorna True se adicionado, False se duplicata."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Pipeline", rows=500, cols=len(_PIPELINE_HEADER))
+        vals = ws.get_all_values()
+
+        # Garante header
+        if not vals or not vals[0] or vals[0][0] != _PIPELINE_HEADER[0]:
+            ws.clear()
+            ws.append_row(_PIPELINE_HEADER, value_input_option="USER_ENTERED")
+            vals = [_PIPELINE_HEADER]
+
+        # Anti-duplicata
+        header = vals[0]
+        try:
+            idx_num = header.index("numero_controle_pncp")
+            existentes = {row[idx_num] for row in vals[1:] if len(row) > idx_num}
+        except ValueError:
+            existentes = set()
+        if entry.get("numero_controle_pncp") in existentes:
+            return False  # já está no pipeline
+
+        linha = [
+            entry.get("numero_controle_pncp", ""),
+            entry.get("orgao", ""),
+            entry.get("municipio", ""),
+            entry.get("uf", ""),
+            entry.get("valor_estimado", ""),
+            entry.get("material", ""),
+            entry.get("score_label", ""),
+            entry.get("link_pncp", ""),
+            entry.get("status", "Novo"),
+            entry.get("responsavel", ""),
+            entry.get("observacoes", ""),
+            datetime.now().isoformat(timespec="seconds"),
+        ]
+        ws.append_row(linha, value_input_option="USER_ENTERED")
+        return True
+    except Exception as exc:
+        st.error(f"Erro ao adicionar ao pipeline: {exc}")
+        return False
+
+
+def _atualizar_status_pipeline(num_controle: str, novo_status: str, obs: str) -> None:
+    """Atualiza status e observações de um item no Pipeline."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Pipeline", rows=500, cols=len(_PIPELINE_HEADER))
+        vals = ws.get_all_values()
+        if not vals or len(vals) < 2:
+            return
+        header = vals[0]
+        try:
+            idx_num = header.index("numero_controle_pncp")
+            idx_status = header.index("status")
+            idx_obs = header.index("observacoes")
+            idx_data = header.index("data_atualizacao")
+        except ValueError:
+            return
+        for i, row in enumerate(vals[1:], start=2):  # linha 1 = header
+            if len(row) > idx_num and row[idx_num] == num_controle:
+                ws.update_cell(i, idx_status + 1, novo_status)
+                ws.update_cell(i, idx_obs + 1, obs)
+                ws.update_cell(i, idx_data + 1, datetime.now().isoformat(timespec="seconds"))
+                break
+    except Exception as exc:
+        st.error(f"Erro ao atualizar pipeline: {exc}")
 
 
 # ===== UI Helpers =====
@@ -762,6 +1055,83 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         )
         st.markdown(html, unsafe_allow_html=True)
 
+        # ----- Botões Streamlit (interativos) -----
+        btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 3])
+        with btn_col1:
+            if st.button("🤖 Analisar com IA", key=f"ia_{idx}_{num_edital}",
+                         help="Claude lê o PDF e extrai: produto, quantidade, prazo e recomendação"):
+                with st.spinner("Baixando edital e consultando Claude..."):
+                    resumo = _resumir_edital(
+                        str(d.get("numero_controle_pncp") or ""),
+                        link_origem, link_pncp,
+                    )
+                if resumo:
+                    st.session_state[f"resumo_{num_edital}"] = resumo
+
+        with btn_col2:
+            if st.button("➕ Pipeline", key=f"pipe_{idx}_{num_edital}",
+                         help="Adicionar este edital ao pipeline de oportunidades"):
+                st.session_state[f"show_pipe_{num_edital}"] = True
+
+        # Exibe resumo IA (se disponível)
+        resumo_cached = st.session_state.get(f"resumo_{num_edital}")
+        if resumo_cached:
+            rec = str(resumo_cached.get("recomendacao") or "").upper()
+            rec_class = {"PARTICIPAR": "cl-ia-rec-participar",
+                         "ANALISAR":   "cl-ia-rec-analisar",
+                         "DESCARTAR":  "cl-ia-rec-descartar"}.get(rec, "cl-ia-rec-analisar")
+            exigs = resumo_cached.get("exigencias_tecnicas") or []
+            exigs_str = " · ".join(exigs[:4]) if isinstance(exigs, list) else str(exigs)
+            st.markdown(
+                f'<div class="cl-ia-box">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">'
+                f'<span style="font-weight:600;font-size:0.88rem;color:#0369A1;">🤖 Análise IA</span>'
+                f'<span class="{rec_class}">{rec}</span>'
+                f'</div>'
+                f'<div style="font-size:0.85rem;color:#1F2937;margin-bottom:0.25rem;">'
+                f'<b>Produto:</b> {resumo_cached.get("produto_exato","—")} · '
+                f'<b>Qtde:</b> {resumo_cached.get("quantidade","—")}</div>'
+                f'<div style="font-size:0.82rem;color:#374151;margin-bottom:0.25rem;">'
+                f'<b>Prazo:</b> {resumo_cached.get("prazo_entrega","—")} · '
+                f'<b>Local:</b> {resumo_cached.get("local_entrega","—")}</div>'
+                f'<div style="font-size:0.8rem;color:#6B7280;">'
+                f'<b>Exigências:</b> {exigs_str or "—"}</div>'
+                f'<div style="font-size:0.78rem;color:#374151;margin-top:0.3rem;font-style:italic;">'
+                f'{resumo_cached.get("justificativa","")}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Form de adicionar ao Pipeline
+        if st.session_state.get(f"show_pipe_{num_edital}"):
+            with st.expander("📌 Adicionar ao Pipeline", expanded=True):
+                with st.form(f"form_pipe_{num_edital}"):
+                    resp_input = st.text_input("Responsável", placeholder="Nome da pessoa responsável")
+                    obs_input  = st.text_area("Observação", placeholder="Ex: Verificar especificação técnica mínima FCK 30", height=80)
+                    submitted  = st.form_submit_button("Adicionar ao Pipeline", type="primary")
+                if submitted:
+                    adicionado = _adicionar_ao_pipeline({
+                        "numero_controle_pncp": str(d.get("numero_controle_pncp") or ""),
+                        "orgao": orgao,
+                        "municipio": d.get("municipio", ""),
+                        "uf": d.get("uf", ""),
+                        "valor_estimado": str(d.get("valor_estimado") or ""),
+                        "material": material,
+                        "score_label": d.get("score_label", ""),
+                        "link_pncp": link_pncp,
+                        "status": "Novo",
+                        "responsavel": resp_input,
+                        "observacoes": obs_input,
+                    })
+                    if adicionado:
+                        st.success("✅ Adicionado ao Pipeline!")
+                        st.cache_data.clear()
+                    else:
+                        st.info("Este edital já está no Pipeline.")
+                    st.session_state.pop(f"show_pipe_{num_edital}", None)
+
+        st.markdown('<div style="margin-bottom:0.5rem;"></div>', unsafe_allow_html=True)
+
 
 def _aba_filiais(fil: pd.DataFrame) -> None:
     st.subheader("Cobertura Operacional")
@@ -790,6 +1160,107 @@ def _aba_filiais(fil: pd.DataFrame) -> None:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+
+
+def _aba_pipeline(ed: pd.DataFrame) -> None:
+    """Aba Pipeline: visão Kanban das oportunidades de licitação."""
+    st.subheader("Pipeline de Oportunidades")
+
+    pipeline = _carregar_pipeline()
+
+    # KPIs
+    total = len(pipeline)
+    participando = (pipeline["status"] == "Participando").sum() if not pipeline.empty and "status" in pipeline.columns else 0
+    ganhou = (pipeline["status"] == "Ganhou").sum() if not pipeline.empty and "status" in pipeline.columns else 0
+    taxa = f"{ganhou/participando*100:.0f}%" if participando > 0 else "—"
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.markdown(_card("No pipeline", str(total)), unsafe_allow_html=True)
+    k2.markdown(_card("Participando", str(participando)), unsafe_allow_html=True)
+    k3.markdown(_card("Ganhos", str(ganhou)), unsafe_allow_html=True)
+    k4.markdown(_card("Taxa de conversão", taxa), unsafe_allow_html=True)
+
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
+    if pipeline.empty:
+        st.info("Nenhum edital no pipeline ainda. Clique em '➕ Pipeline' nos cards da aba Editais.")
+        return
+
+    # Layout Kanban: 3 colunas por linha
+    row1_statuses = ["Novo", "Em Análise", "Participando"]
+    row2_statuses = ["Ganhou", "Perdeu", "Desistiu"]
+
+    _STATUS_COLOR = {
+        "Novo": "#DBEAFE", "Em Análise": "#FEF9C3", "Participando": "#DCFCE7",
+        "Ganhou": "#D1FAE5", "Perdeu": "#FEE2E2", "Desistiu": "#F3F4F6",
+    }
+
+    def _render_kanban_row(statuses: list[str]) -> None:
+        cols = st.columns(3)
+        for col_idx, status in enumerate(statuses):
+            items = pipeline[pipeline["status"] == status] if "status" in pipeline.columns else pd.DataFrame()
+            with cols[col_idx]:
+                cor = _STATUS_COLOR.get(status, "#F3F4F6")
+                st.markdown(
+                    f'<div class="cl-pipeline-col" style="border-top:3px solid {cor};">'
+                    f'<div class="cl-pipeline-col-title">{status} ({len(items)})</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                for _, row in items.iterrows():
+                    num = row.get("numero_controle_pncp", "")
+                    orgao_p = str(row.get("orgao") or "")[:45]
+                    cidade_p = f"{row.get('municipio','')} / {row.get('uf','')}"
+                    valor_p = row.get("valor_estimado", "")
+                    try:
+                        valor_p = f"R$ {float(str(valor_p).replace(',','.'))/1000:.0f}k"
+                    except (ValueError, TypeError):
+                        valor_p = str(valor_p)
+                    score_p = str(row.get("score_label") or "")
+                    link_p  = str(row.get("link_pncp") or "")
+                    resp_p  = str(row.get("responsavel") or "")
+
+                    with st.container():
+                        st.markdown(
+                            f'<div class="cl-pipeline-card">'
+                            f'<div style="font-weight:600;font-size:0.82rem;color:#0E2A47;margin-bottom:2px;">{orgao_p}</div>'
+                            f'<div style="font-size:0.78rem;color:#6B7280;">📍 {cidade_p}</div>'
+                            f'<div style="font-size:0.78rem;color:#6B7280;">{valor_p}'
+                            + (f' · {score_p}' if score_p else '') +
+                            (f' · 👤 {resp_p}' if resp_p else '') +
+                            f'</div>'
+                            + (f'<div style="margin-top:4px;"><a href="{link_p}" target="_blank" style="font-size:0.75rem;color:#1E40AF;">🔍 PNCP</a></div>' if link_p else '') +
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        # Seletor de status + salvar
+                        novo_status = st.selectbox(
+                            "Status", _PIPELINE_STATUS,
+                            index=_PIPELINE_STATUS.index(status) if status in _PIPELINE_STATUS else 0,
+                            key=f"sel_{num}",
+                            label_visibility="collapsed",
+                        )
+                        nova_obs = st.text_input("Obs.", value=str(row.get("observacoes") or ""),
+                                                 key=f"obs_{num}", label_visibility="collapsed",
+                                                 placeholder="Observação…")
+                        if st.button("💾", key=f"save_{num}", help="Salvar"):
+                            _atualizar_status_pipeline(num, novo_status, nova_obs)
+                            st.success("Salvo!")
+                            st.cache_data.clear()
+                            st.rerun()
+
+    _render_kanban_row(row1_statuses)
+    st.markdown('<div style="margin-top:0.5rem;"></div>', unsafe_allow_html=True)
+    _render_kanban_row(row2_statuses)
+
+    # Download do pipeline como CSV
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+    st.download_button(
+        "📥 Baixar Pipeline CSV",
+        data=pipeline.to_csv(index=False).encode("utf-8"),
+        file_name=f"pipeline_{datetime.now():%Y%m%d}.csv",
+        mime="text/csv",
+    )
 
 
 def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
@@ -841,8 +1312,8 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Visão Geral", "🗺️ Mapa", "📋 Editais", "🏭 Filiais", "📅 Diário",
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Visão Geral", "🗺️ Mapa", "📋 Editais", "📌 Pipeline", "🏭 Filiais", "📅 Diário",
     ])
     with tab1:
         _aba_visao_geral(ed_f, fil)
@@ -851,8 +1322,10 @@ def main() -> None:
     with tab3:
         _aba_editais(ed_f)
     with tab4:
-        _aba_filiais(fil)
+        _aba_pipeline(ed_f)
     with tab5:
+        _aba_filiais(fil)
+    with tab6:
         _aba_diario(ed_f, ultima)
 
 
