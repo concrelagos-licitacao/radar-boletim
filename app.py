@@ -358,7 +358,7 @@ def _build_gspread_client():
 def _gemini_client():
     """Retorna modelo Gemini configurado. Lê chave de st.secrets ou variável de ambiente.
 
-    Usa gemini-1.5-flash — gratuito (15 req/min, 1M tokens/dia no tier Free).
+    Usa gemini-2.0-flash — gratuito (15 req/min, 1M tokens/dia no tier Free).
     Chave obtida em https://aistudio.google.com/app/apikey (projeto concrelagos-hub).
     """
     key = os.environ.get("GEMINI_API_KEY", "")
@@ -372,7 +372,7 @@ def _gemini_client():
     try:
         import google.generativeai as genai
         genai.configure(api_key=key)
-        return genai.GenerativeModel("gemini-1.5-flash")
+        return genai.GenerativeModel("gemini-2.0-flash")
     except ImportError:
         return None
 
@@ -552,7 +552,7 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         st.warning("PDF sem texto extraível (provavelmente escaneado). Análise IA não disponível.")
         return None
 
-    # 4) Chama Gemini (gratuito — gemini-1.5-flash, 15 req/min, 1M tokens/dia)
+    # 4) Chama Gemini (gratuito — gemini-2.0-flash, 15 req/min, 1M tokens/dia)
     prompt = f"""Analise este edital público brasileiro de fornecimento de concreto usinado ou brita.
 Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
 {{
