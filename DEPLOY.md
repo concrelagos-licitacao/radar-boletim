@@ -155,6 +155,32 @@ Compartilhe com a diretoria. Login: a senha que você definiu em `[auth]password
 
 ---
 
+## Manter o app sempre acordado (eliminar cold start)
+
+O Streamlit Community Cloud hiberna o app após ~1h de inatividade. Duas opções gratuitas:
+
+### Opção A — UptimeRobot (recomendado, 5 min de configuração)
+
+1. Crie conta gratuita em **https://uptimerobot.com**
+2. Clique **Add New Monitor**
+3. Preencha:
+   - **Monitor Type**: HTTP(s)
+   - **Friendly Name**: Concrelagos Hub
+   - **URL**: `https://concrelagos-intelligence-viynfmh4nlzrfjdktekn2f.streamlit.app/`
+   - **Monitoring Interval**: 5 minutes
+4. **Create Monitor**. Pronto.
+
+O UptimeRobot pinga o app a cada 5 min gratuitamente. O app nunca dorme.
+Bônus: você recebe e-mail de alerta se o app cair.
+
+### Opção B — GitHub Actions (já está no repositório)
+
+O arquivo `.github/workflows/keepalive.yml` pinga o app a cada 30 min durante o horário comercial (06h–20h Brasília). Basta fazer o push — já está ativado.
+
+Para **desativar**: GitHub → Actions → "Keep-Alive Streamlit" → ⋯ → Disable workflow.
+
+---
+
 ## Manutenção rotineira
 
 - **Adicionar nova filial**: edite `dados/filiais.csv`, rode `python bootstrap.py --force` localmente, faça `git commit` e `git push`. O GitHub Actions pega na próxima execução.

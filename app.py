@@ -146,6 +146,24 @@ st.markdown(
         border-radius: 4px;
         letter-spacing: 0.06em;
     }
+    .cl-score-3 {
+        background: #DCFCE7; color: #15803D;
+        font-weight: 700; font-size: 0.72rem;
+        padding: 0.2rem 0.6rem; border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
+    .cl-score-2 {
+        background: #FEF9C3; color: #854D0E;
+        font-weight: 700; font-size: 0.72rem;
+        padding: 0.2rem 0.6rem; border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
+    .cl-score-1 {
+        background: #F3F4F6; color: #4B5563;
+        font-weight: 700; font-size: 0.72rem;
+        padding: 0.2rem 0.6rem; border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
     .cl-edital-body {
         padding: 1rem 1.25rem;
     }
@@ -379,6 +397,10 @@ def _carregar_dados() -> tuple[pd.DataFrame, pd.DataFrame, datetime | None]:
         for col in ("data_execucao", "data_abertura", "data_encerramento"):
             if col in ed.columns:
                 ed[col] = pd.to_datetime(ed[col], errors="coerce")
+        # Garante colunas de score/confiança mesmo em planilhas antigas (backward compat)
+        for col_default in ("score", "score_label", "keyword_trigger", "itens_encontrados"):
+            if col_default not in ed.columns:
+                ed[col_default] = ""
 
     ultima = ed["data_execucao"].max() if "data_execucao" in ed.columns and not ed.empty else None
     return fil, ed, ultima
@@ -416,6 +438,19 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
     materiais = sorted(set(ed["material"].dropna().tolist())) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
     mat_sel = st.sidebar.multiselect("Material", materiais, default=materiais)
 
+    # Filtro de confiança (score) — só aparece se a coluna existir
+    score_opcoes = {"CERTO (3)": 3, "PROVÁVEL (2)": 2, "POSSÍVEL (1)": 1}
+    if "score_label" in ed.columns and not ed.empty:
+        scores_presentes = sorted(ed["score"].dropna().unique().tolist(), reverse=True)
+        score_labels_presentes = [k for k, v in score_opcoes.items() if v in scores_presentes]
+        score_sel_labels = st.sidebar.multiselect(
+            "Confiança", score_labels_presentes, default=score_labels_presentes,
+            help="CERTO = keyword exata no objeto · PROVÁVEL = keyword indireta · POSSÍVEL = edital genérico (pode conter o produto)",
+        )
+        score_sel = [score_opcoes[l] for l in score_sel_labels]
+    else:
+        score_sel = []
+
     valor_min = float(ed["valor_estimado"].min()) if not ed.empty and "valor_estimado" in ed.columns else 180_000.0
     valor_max = float(ed["valor_estimado"].max()) if not ed.empty and "valor_estimado" in ed.columns else 10_000_000.0
     valor_range = st.sidebar.slider(
@@ -447,6 +482,7 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
     return {
         "ufs": uf_sel,
         "materiais": mat_sel,
+        "scores": score_sel,
         "valor_min": valor_range[0],
         "valor_max": valor_range[1],
         "dist_lim": dist_lim,
@@ -463,6 +499,9 @@ def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         df = df[df["uf"].isin(filtros["ufs"])]
     if "material" in df.columns and filtros["materiais"]:
         df = df[df["material"].isin(filtros["materiais"])]
+    if "score" in df.columns and filtros.get("scores"):
+        df["score"] = pd.to_numeric(df["score"], errors="coerce")
+        df = df[df["score"].isin(filtros["scores"])]
     if "valor_estimado" in df.columns:
         df = df[(df["valor_estimado"] >= filtros["valor_min"]) & (df["valor_estimado"] <= filtros["valor_max"])]
     if "distancia_km" in df.columns:
@@ -652,9 +691,35 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         link_pncp = d.get("link_pncp") or ""
         link_origem = d.get("link_sistema_origem") or ""
         tag_material_class = "cl-tag-pedreira" if material == "brita" else "cl-tag-usina"
+        itens_enc = str(d.get("itens_encontrados") or "").strip()
+        keyword_trig = str(d.get("keyword_trigger") or "").strip()
+
+        # Score de confiança
+        try:
+            score_val = int(d.get("score") or 0)
+        except (ValueError, TypeError):
+            score_val = 0
+        _score_map = {3: ("cl-score-3", "✅ CERTO"), 2: ("cl-score-2", "⚠️ PROVÁVEL"), 1: ("cl-score-1", "🔍 POSSÍVEL")}
+        score_cls, score_txt = _score_map.get(score_val, ("cl-score-1", ""))
+        tag_score_html = f'<span class="{score_cls}">{score_txt}</span>' if score_val else ""
 
         # Tag URGENTE (canto superior direito)
         tag_urgente_html = '<span class="cl-edital-urgent">URGENTE</span>' if urgente else ""
+
+        # Linha de item encontrado (somente quando preenchido)
+        item_enc_html = (
+            f'<div style="font-size:0.8rem;color:#374151;margin-top:0.5rem;'
+            f'background:#F0FDF4;padding:0.35rem 0.6rem;border-radius:4px;border-left:3px solid #16A34A;">'
+            f'🔎 <b>Item encontrado:</b> {itens_enc[:180]}'
+            f'</div>'
+        ) if itens_enc else ""
+
+        # Linha de keyword que disparou (discreta, abaixo do objeto)
+        kw_html = (
+            f'<div style="font-size:0.75rem;color:#9CA3AF;margin-bottom:0.3rem;">'
+            f'Keyword: <em>{keyword_trig}</em>'
+            f'</div>'
+        ) if keyword_trig else ""
 
         # Botões
         botoes = []
@@ -668,11 +733,16 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         html = (
             f'<div class="cl-edital-card">'
             f'<div class="cl-edital-header">'
+            f'<div style="display:flex;align-items:center;gap:0.5rem;">'
             f'<div class="cl-edital-num">{idx}</div>'
+            f'{tag_score_html}'
+            f'</div>'
             f'{tag_urgente_html}'
             f'</div>'
             f'<div class="cl-edital-body">'
             f'<div class="cl-edital-objeto"><b>Objeto:</b> {objeto[:400]}</div>'
+            f'{kw_html}'
+            f'{item_enc_html}'
             f'<div class="cl-edital-meta">'
             f'<div><b>Datas:</b> Documento: {data_ab}</div>'
             f'<div><b>Órgão:</b> <span style="color:#1E40AF;">{orgao}</span></div>'

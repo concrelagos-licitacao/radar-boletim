@@ -52,37 +52,63 @@ RAIO_PEDREIRA_KM = 700
 ESTADOS_CONCRETO = {"MG", "SP", "ES", "RJ", "PR", "BA"}
 ESTADOS_BRITA = {"RJ"}
 
-# Palavras-chave amplas (todos comparados após _normalize: lower + sem acento).
-# Concreto: variantes técnicas + termos genéricos que podem esconder concreto usinado.
-KEYWORDS_CONCRETO = (
-    "concreto usinado",
-    "concreto pre-misturado",
-    "concreto pre misturado",
-    "concreto dosado",
-    "concreto dosado em central",
-    "concreto preparado",
-    "concreto fck",            # spec técnica frequente (concreto fck 25, 30, etc.)
-    "concreto armado",
-    "concreto comercializado",
-    "concretagem",
-    "fornecimento de concreto",
-    "materiais de construcao", # cobre "materiais de construção" sem acento
-    "material de construcao",
-)
+# Palavras-chave organizadas por SCORE DE CONFIANÇA (3=CERTO, 2=PROVÁVEL, 1=POSSÍVEL).
+# A filtragem percorre do score mais alto para o mais baixo e para no primeiro match.
+#
+# Score 3 — CERTO: o objeto/item fala explicitamente em compra do produto.
+# Score 2 — PROVÁVEL: serviço que normalmente exige compra do produto, mas precisa
+#            confirmar nos itens ou no edital completo.
+# Score 1 — POSSÍVEL: edital genérico ("materiais de construção") — pode ou não
+#            conter concreto usinado; editais deste grupo passam pelo enriquecimento
+#            por itens (se PNCP_BUSCAR_ITENS=true) para promoção a score=2.
+KEYWORDS_CONCRETO: dict[int, tuple[str, ...]] = {
+    3: (
+        "concreto usinado",
+        "concreto pre-misturado",
+        "concreto pre misturado",
+        "concreto dosado",
+        "concreto dosado em central",
+        "concreto preparado",
+        "concreto comercializado",
+        "fornecimento de concreto",
+    ),
+    2: (
+        "concreto fck",         # spec técnica frequente (concreto fck 25, 30, etc.)
+        "concreto armado",
+        "concretagem",
+    ),
+    1: (
+        "materiais de construcao",   # cobre "materiais de construção" sem acento
+        "material de construcao",
+    ),
+}
 # Brita: agregados de qualquer tipo, pedras, pedriscos.
-KEYWORDS_BRITA = (
-    "brita",
-    "agregado",                # cobre "agregado graúdo", "agregados", etc.
-    "agregados",
-    "pedrisco",
-    "pedras britadas",
-    "pedra britada",
-    "pedras para construcao",
-    "pedra para construcao",
-    "rachao",                  # "rachão" sem acento (pedra de mão)
-    "pedregulho",
-    "cascalho",
-)
+KEYWORDS_BRITA: dict[int, tuple[str, ...]] = {
+    3: (
+        "brita",
+        "pedrisco",
+        "pedra britada",
+        "pedras britadas",
+        "rachao",               # "rachão" sem acento (pedra de mão)
+        "pedregulho",
+        "cascalho",
+    ),
+    2: (
+        "agregado graudo",      # cobre "agregado graúdo" normalizado
+        "agregados graudos",
+        "agregado",             # só score 2 para não capturar "agregado miúdo" (areia)
+        "agregados",
+    ),
+}
+
+SCORE_LABEL = {3: "CERTO", 2: "PROVÁVEL", 1: "POSSÍVEL"}
+
+# Enriquecimento por itens: consulta o endpoint de itens do PNCP para editais
+# com score=1 (genéricos), buscando keywords score=3 nas descrições dos itens.
+# Ativado por PNCP_BUSCAR_ITENS=true (padrão false localmente, true em produção).
+PNCP_BUSCAR_ITENS = os.getenv("PNCP_BUSCAR_ITENS", "false").lower() == "true"
+PNCP_ITENS_MAX = int(os.getenv("PNCP_ITENS_MAX", "50"))  # máximo de editais score=1 a consultar
+PNCP_ITENS_BASE_URL = "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{seq}/itens"
 
 PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 PNCP_TAMANHO_PAGINA = 50    # menor que 500 para evitar timeouts
@@ -92,7 +118,7 @@ PNCP_MAX_PAGINAS = int(os.getenv("PNCP_MAX_PAGINAS", "5"))    # 5 páginas/modal
 # Códigos de modalidade conforme tabela de domínio do PNCP — varremos pregão,
 # concorrência, dispensa, inexigibilidade e leilão, que cobrem o universo
 # relevante para insumos de construção.
-PNCP_MODALIDADES = (6, 4, 8, 9, 1)
+PNCP_MODALIDADES = (6, 4, 8, 9, 1, 3)   # 3 = Concorrência Eletrônica (obras de grande porte)
 
 ABA_FILIAIS = "Filiais"
 ABA_OUTPUT = "Novas Licitações"
@@ -125,6 +151,11 @@ OUTPUT_HEADER = [
     "distancia_km",
     "link_pncp",              # página oficial PNCP do edital
     "link_sistema_origem",    # link sistema do órgão (comprasnet, etc.)
+    # -- campos de confiança (adicionados na Fase 6) --
+    "score",                  # 1=POSSÍVEL / 2=PROVÁVEL / 3=CERTO
+    "score_label",            # "POSSÍVEL" / "PROVÁVEL" / "CERTO"
+    "keyword_trigger",        # keyword que disparou o match
+    "itens_encontrados",      # item PNCP relevante encontrado (somente para score=1 enriquecido)
 ]
 
 # Mapeamento de modalidade PNCP → sigla e nome
@@ -434,6 +465,10 @@ def _extrair_edital(item: dict) -> dict:
         "data_encerramento": item.get("dataEncerramentoProposta") or "",
         "link_pncp": link_pncp_pagina,
         "link_sistema_origem": item.get("linkSistemaOrigem") or "",
+        # campos internos para enriquecimento por itens (não gravados diretamente)
+        "_cnpj": cnpj,
+        "_ano_compra": str(ano) if ano else "",
+        "_seq_compra": str(seq) if seq else "",
     }
 
 
@@ -441,6 +476,11 @@ def _extrair_edital(item: dict) -> dict:
 # FASE 2 — FILTROS DE KEYWORD, ESTADO E VALOR
 # =========================================================================
 def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
+    """Filtra editais por keyword, estado e valor mínimo.
+
+    Percorre KEYWORDS_CONCRETO e KEYWORDS_BRITA do score mais alto (3) para o mais
+    baixo (1) e para no primeiro match, anotando `score` e `keyword_trigger`.
+    """
     sobreviventes: list[dict] = []
     for ed in editais:
         if ed["valor_estimado"] < VALOR_MINIMO_GERAL:
@@ -448,17 +488,127 @@ def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
         objeto_norm = _normalize(ed["objeto"])
         uf = ed["uf"]
 
-        eh_concreto = uf in ESTADOS_CONCRETO and any(k in objeto_norm for k in KEYWORDS_CONCRETO)
-        eh_brita = uf in ESTADOS_BRITA and any(k in objeto_norm for k in KEYWORDS_BRITA)
+        matched = False
+        # Tenta concreto (score 3→1)
+        if uf in ESTADOS_CONCRETO:
+            for score in (3, 2, 1):
+                hit = next((k for k in KEYWORDS_CONCRETO[score] if k in objeto_norm), None)
+                if hit:
+                    ed["material"] = "concreto"
+                    ed["score"] = score
+                    ed["score_label"] = SCORE_LABEL[score]
+                    ed["keyword_trigger"] = hit
+                    ed.setdefault("itens_encontrados", "")
+                    sobreviventes.append(ed)
+                    matched = True
+                    break
 
-        if eh_concreto:
-            ed["material"] = "concreto"
-            sobreviventes.append(ed)
-        elif eh_brita:
-            ed["material"] = "brita"
-            sobreviventes.append(ed)
+        # Tenta brita (score 3→2; score 1 não existe para brita)
+        if not matched and uf in ESTADOS_BRITA:
+            for score in (3, 2):
+                hit = next((k for k in KEYWORDS_BRITA[score] if k in objeto_norm), None)
+                if hit:
+                    ed["material"] = "brita"
+                    ed["score"] = score
+                    ed["score_label"] = SCORE_LABEL[score]
+                    ed["keyword_trigger"] = hit
+                    ed.setdefault("itens_encontrados", "")
+                    sobreviventes.append(ed)
+                    break
+
     logging.info("%d editais após filtro keyword/estado/valor.", len(sobreviventes))
     return sobreviventes
+
+
+# =========================================================================
+# FASE 2b — ENRIQUECIMENTO POR ITENS (somente editais score=1)
+# =========================================================================
+def _buscar_itens_edital(cnpj: str, ano: str, seq: str) -> list[str]:
+    """Consulta o endpoint de itens de uma contratação PNCP.
+
+    Retorna lista de descrições de itens (strings normalizadas).
+    Falha silenciosa: retorna lista vazia se qualquer erro ocorrer.
+
+    Endpoint: GET /api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{seq}/itens
+    """
+    if not cnpj or not ano or not seq:
+        return []
+    url = PNCP_ITENS_BASE_URL.format(cnpj=cnpj, ano=ano, seq=seq)
+    descricoes: list[str] = []
+    pagina = 1
+    while True:
+        try:
+            resp = requests.get(
+                url,
+                params={"pagina": pagina, "tamanhoPagina": 500},
+                timeout=PNCP_TIMEOUT_S,
+            )
+            if resp.status_code in (404, 204):
+                break
+            resp.raise_for_status()
+            payload = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            logging.debug("Items endpoint erro para %s/%s/%s p%d: %s", cnpj, ano, seq, pagina, exc)
+            break
+
+        itens = payload.get("data") or []
+        for it in itens:
+            desc = it.get("descricao") or it.get("descricaoItem") or ""
+            if desc:
+                descricoes.append(_normalize(desc))
+
+        total_pag = payload.get("totalPaginas") or 1
+        if pagina >= total_pag or not itens:
+            break
+        pagina += 1
+
+    return descricoes
+
+
+def enriquecer_com_itens(editais: list[dict]) -> list[dict]:
+    """Para editais com score=1, consulta os itens PNCP buscando keywords score=3.
+
+    Se encontrar, promove o edital a score=2 e preenche `itens_encontrados`.
+    Processa no máximo PNCP_ITENS_MAX editais score=1 (os primeiros da lista).
+
+    Ativado apenas quando PNCP_BUSCAR_ITENS=true.
+    """
+    if not PNCP_BUSCAR_ITENS:
+        return editais
+
+    # Todas as keywords score=3 de concreto + brita (para verificação nos itens)
+    kw_diretas = set(KEYWORDS_CONCRETO[3]) | set(KEYWORDS_BRITA[3])
+
+    candidatos = [ed for ed in editais if ed.get("score") == 1]
+    if not candidatos:
+        return editais
+
+    limite = min(len(candidatos), PNCP_ITENS_MAX)
+    logging.info("Enriquecimento por itens: consultando %d edital(is) score=1 (limite=%d).",
+                 len(candidatos), limite)
+    promovidos = 0
+
+    for ed in candidatos[:limite]:
+        cnpj = ed.get("_cnpj", "")
+        ano = ed.get("_ano_compra", "")
+        seq = ed.get("_seq_compra", "")
+        descricoes = _buscar_itens_edital(cnpj, ano, seq)
+
+        for desc_norm in descricoes:
+            hit = next((k for k in kw_diretas if k in desc_norm), None)
+            if hit:
+                ed["score"] = 2
+                ed["score_label"] = SCORE_LABEL[2]
+                # Guarda trecho original (denormalizado se possível) para exibir no dashboard
+                ed["itens_encontrados"] = desc_norm[:200]
+                promovidos += 1
+                logging.info("Edital %s promovido a score=2 via item '%s'.",
+                             ed.get("numero_controle_pncp", "?"), hit)
+                break  # basta 1 item para confirmar
+
+    logging.info("Itens consultados para %d edital(is) score=1 — %d promovido(s) a score=2.",
+                 limite, promovidos)
+    return editais
 
 
 # =========================================================================
@@ -591,6 +741,14 @@ def gravar_em_sheets(qualificados: list[dict], sheet_id: str) -> None:
             ja_gravados: set[str] = set()
         else:
             header_atual = valores_existentes[0]
+            # Migração incremental: adiciona colunas novas se o header antigo não as tem.
+            colunas_faltando = [c for c in OUTPUT_HEADER if c not in header_atual]
+            if colunas_faltando:
+                nova_linha_header = header_atual + colunas_faltando
+                # Atualiza a linha 1 (range A1:col_N onde N = len(nova_linha_header))
+                aba.update("A1", [nova_linha_header], value_input_option="USER_ENTERED")
+                logging.info("Header da aba '%s' atualizado com colunas novas: %s.",
+                             ABA_OUTPUT, colunas_faltando)
             try:
                 idx_pncp = header_atual.index("numero_controle_pncp")
                 ja_gravados = {row[idx_pncp] for row in valores_existentes[1:] if len(row) > idx_pncp}
@@ -634,6 +792,10 @@ def _edital_para_linha(ed: dict, ts: str) -> list:
         ed.get("distancia_km", ""),
         ed.get("link_pncp", ""),
         ed.get("link_sistema_origem", ""),
+        ed.get("score", ""),
+        ed.get("score_label", ""),
+        ed.get("keyword_trigger", ""),
+        ed.get("itens_encontrados", ""),
     ]
 
 
@@ -677,6 +839,7 @@ def main() -> None:
 
     brutos = buscar_editais_pncp(data_inicial, data_final)
     pre = filtrar_por_keyword_estado_valor(brutos)
+    pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
     qualificados = qualificar_por_distancia(pre, filiais)
     gravar_em_sheets(qualificados, sheet_id)
 

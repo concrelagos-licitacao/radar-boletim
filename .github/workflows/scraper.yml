@@ -27,6 +27,9 @@ jobs:
       PNCP_TIMEOUT_S: '60'
       PNCP_RETRY_COUNT: '2'
       HAVERSINE_AJUSTE_FATOR: '1.0'
+      # Enriquecimento por itens: consulta endpoint de itens para editais genéricos (score=1)
+      PNCP_BUSCAR_ITENS: 'true'
+      PNCP_ITENS_MAX: '100'
       PYTHONIOENCODING: 'utf-8'
 
     steps:
