@@ -47,13 +47,13 @@ load_dotenv()
 # =========================================================================
 # REGRAS DE NEGÓCIO
 # =========================================================================
-VALOR_MINIMO_GERAL = 180_000.00
-VALOR_MINIMO_PEDREIRA = 200_000.00
+VALOR_MINIMO_GERAL    = float(os.getenv("VALOR_MINIMO_GERAL",    "50000"))
+VALOR_MINIMO_PEDREIRA = float(os.getenv("VALOR_MINIMO_PEDREIRA", "80000"))
 RAIO_USINA_KM = 70
 RAIO_PEDREIRA_KM = 700
 
 ESTADOS_CONCRETO = {"MG", "SP", "ES", "RJ", "PR", "BA"}
-ESTADOS_BRITA = {"RJ"}
+ESTADOS_BRITA    = {"MG", "SP", "RJ", "ES", "PR", "BA"}  # expandido (era só RJ)
 
 # Palavras-chave organizadas por SCORE DE CONFIANÇA (3=CERTO, 2=PROVÁVEL, 1=POSSÍVEL).
 # A filtragem percorre do score mais alto para o mais baixo e para no primeiro match.
@@ -74,11 +74,16 @@ KEYWORDS_CONCRETO: dict[int, tuple[str, ...]] = {
         "concreto preparado",
         "concreto comercializado",
         "fornecimento de concreto",
+        "concreto bombeado",        # muito comum em obras de médio porte
+        "concreto fck",             # spec técnica explícita (ex: concreto fck 25 MPa)
     ),
     2: (
-        "concreto fck",         # spec técnica frequente (concreto fck 25, 30, etc.)
+        "concreto",                 # "aquisição de concreto", "fornecimento de concreto" genérico
         "concreto armado",
         "concretagem",
+        "concreto estrutural",
+        "concreto para pavimentacao",
+        "concreto magro",
     ),
     1: (
         "materiais de construcao",   # cobre "materiais de construção" sem acento
@@ -101,6 +106,10 @@ KEYWORDS_BRITA: dict[int, tuple[str, ...]] = {
         "agregados graudos",
         "agregado",             # só score 2 para não capturar "agregado miúdo" (areia)
         "agregados",
+    ),
+    1: (
+        "materiais de construcao",  # pode conter brita — enriquecimento por itens vai confirmar
+        "material de construcao",
     ),
 }
 
@@ -368,8 +377,10 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
     """
     coletados: list[dict] = []
 
+    contagem_por_modalidade: dict[int, int] = {}
     for modalidade in PNCP_MODALIDADES:
         pagina = 1
+        total_modalidade = 0
         while True:
             params = {
                 "dataInicial": data_inicial.strftime("%Y%m%d"),
@@ -383,9 +394,13 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
                 break
 
             itens = payload.get("data") or []
+            logging.info("PNCP modalidade=%d pagina=%d/%s: %d itens recebidos",
+                         modalidade, pagina,
+                         payload.get("totalPaginas", "?"), len(itens))
             for item in itens:
                 try:
                     coletados.append(_extrair_edital(item))
+                    total_modalidade += 1
                 except (KeyError, TypeError) as e:
                     logging.debug("Edital descartado por estrutura incompleta: %s", e)
                     continue
@@ -398,9 +413,12 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
                              PNCP_MAX_PAGINAS, modalidade)
                 break
             pagina += 1
+        contagem_por_modalidade[modalidade] = total_modalidade
 
-    logging.info("PNCP retornou %d editais (bruto) na janela %s a %s.",
-                 len(coletados), data_inicial, data_final)
+    logging.info("PNCP retornou %d editais (bruto) na janela %s a %s. Por modalidade: %s",
+                 len(coletados), data_inicial, data_final, contagem_por_modalidade)
+    if not coletados:
+        logging.warning("PNCP retornou 0 editais brutos — possível problema de API, rede ou janela de datas vazia.")
     return coletados
 
 
@@ -514,9 +532,9 @@ def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
                     matched = True
                     break
 
-        # Tenta brita (score 3→2; score 1 não existe para brita)
+        # Tenta brita (score 3→2→1; score=1 passa pelo enriquecimento de itens)
         if not matched and uf in ESTADOS_BRITA:
-            for score in (3, 2):
+            for score in (3, 2, 1):
                 hit = next((k for k in KEYWORDS_BRITA[score] if k in objeto_norm), None)
                 if hit:
                     ed["material"] = "brita"
@@ -938,6 +956,40 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
 
 
 # =========================================================================
+# LOG DE EXECUÇÕES
+# =========================================================================
+_EXECUCOES_HEADER = [
+    "data_execucao", "status", "brutos", "apos_keyword",
+    "apos_geo", "novos", "tempo_s", "erro_msg",
+]
+
+def _gravar_execucao_sheets(sheet_id: str, dados: dict) -> None:
+    """Grava uma linha de auditoria na aba 'Execucoes' do Sheets.
+
+    Cria a aba automaticamente se não existir. Falha silenciosa.
+    """
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("Execucoes")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title="Execucoes", rows=1000, cols=len(_EXECUCOES_HEADER))
+            ws.append_row(_EXECUCOES_HEADER, value_input_option="USER_ENTERED")
+        # Garante header se aba estava vazia
+        vals = ws.get_all_values()
+        if not vals or vals[0] != _EXECUCOES_HEADER:
+            ws.clear()
+            ws.append_row(_EXECUCOES_HEADER, value_input_option="USER_ENTERED")
+        linha = [str(dados.get(col, "")) for col in _EXECUCOES_HEADER]
+        ws.append_row(linha, value_input_option="USER_ENTERED")
+        logging.info("Execução gravada na aba 'Execucoes' do Sheets.")
+    except Exception as exc:
+        logging.warning("Não foi possível gravar execução no Sheets: %s", exc)
+
+
+# =========================================================================
 # ORQUESTRADOR
 # =========================================================================
 def main() -> None:
@@ -963,11 +1015,47 @@ def main() -> None:
     sheet_id = os.environ["GOOGLE_SHEETS_ID"]
     filiais = carregar_filiais(sheet_id)
 
-    brutos = buscar_editais_pncp(data_inicial, data_final)
-    pre = filtrar_por_keyword_estado_valor(brutos)
-    pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
-    qualificados = qualificar_por_distancia(pre, filiais)
-    novos = gravar_em_sheets(qualificados, sheet_id)
+    t0 = time.time()
+    erro_execucao = ""
+    novos: list[dict] = []
+    qualificados: list[dict] = []
+    pre: list[dict] = []
+    brutos: list[dict] = []
+    try:
+        brutos = buscar_editais_pncp(data_inicial, data_final)
+        pre = filtrar_por_keyword_estado_valor(brutos)
+        pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
+        qualificados = qualificar_por_distancia(pre, filiais)
+        novos = gravar_em_sheets(qualificados, sheet_id)
+    except Exception as exc:
+        erro_execucao = str(exc)
+        logging.error("Erro inesperado na execução principal: %s", exc)
+
+    tempo_s = round(time.time() - t0, 1)
+
+    # Log do funil completo — mostra onde os editais são descartados
+    logging.info(
+        "FUNIL: brutos=%d → keyword=%d → geo=%d → novos=%d | tempo=%.1fs",
+        len(brutos), len(pre), len(qualificados), len(novos), tempo_s,
+    )
+    if len(brutos) > 0 and len(pre) == 0:
+        logging.warning("FUNIL: todos os editais descartados pelo filtro de keyword/estado/valor. "
+                        "Verifique KEYWORDS_*, ESTADOS_* e VALOR_MINIMO_*.")
+    if len(pre) > 0 and len(qualificados) == 0:
+        logging.warning("FUNIL: editais passaram pelo keyword mas todos descartados pela qualificação geográfica. "
+                        "Verifique se as filiais têm coordenadas válidas no Sheets.")
+
+    # Grava execução na aba "Execucoes" do Sheets (auditoria permanente)
+    _gravar_execucao_sheets(sheet_id, {
+        "data_execucao": datetime.now().isoformat(timespec="seconds"),
+        "status": "erro" if erro_execucao else "ok",
+        "brutos": len(brutos),
+        "apos_keyword": len(pre),
+        "apos_geo": len(qualificados),
+        "novos": len(novos),
+        "tempo_s": tempo_s,
+        "erro_msg": erro_execucao,
+    })
 
     # Notificação por e-mail com os editais realmente novos (anti-duplicata aplicado)
     enviar_notificacao_email(novos)

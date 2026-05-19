@@ -30,6 +30,9 @@ jobs:
       # Enriquecimento por itens: consulta endpoint de itens para editais genéricos (score=1)
       PNCP_BUSCAR_ITENS: 'true'
       PNCP_ITENS_MAX: '100'
+      # Filtro de valor mínimo (configurável para não descartar editais municipais menores)
+      VALOR_MINIMO_GERAL:    '50000'
+      VALOR_MINIMO_PEDREIRA: '80000'
       # Notificações por e-mail (configure os 3 Secrets abaixo no GitHub)
       NOTIFICACAO_EMAIL_DE:    ${{ secrets.NOTIFICACAO_EMAIL_DE }}
       NOTIFICACAO_EMAIL_SENHA: ${{ secrets.NOTIFICACAO_EMAIL_SENHA }}
