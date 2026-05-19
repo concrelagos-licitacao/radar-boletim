@@ -396,6 +396,29 @@ def _get_sheet_id() -> str:
         st.stop()
 
 
+@st.cache_data(ttl=300, show_spinner="Carregando execuções...")
+def _carregar_execucoes() -> pd.DataFrame:
+    """Carrega a aba 'Execucoes' do Sheets com histórico de runs do scraper."""
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = sh.worksheet("Execucoes")
+        vals = ws.get_all_values()
+        if not vals or len(vals) < 2:
+            return pd.DataFrame()
+        header = [h.strip() for h in vals[0]]
+        rows = [dict(zip(header, r)) for r in vals[1:] if any(c.strip() for c in r)]
+        df = pd.DataFrame(rows)
+        if "data_execucao" in df.columns:
+            df["data_execucao"] = pd.to_datetime(df["data_execucao"], errors="coerce")
+        for col in ("brutos", "apos_keyword", "apos_geo", "novos", "tempo_s"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=300, show_spinner="Carregando dados da planilha...")
 def _carregar_dados() -> tuple[pd.DataFrame, pd.DataFrame, datetime | None]:
     """Carrega abas Filiais + Novas Licitações via get_all_values (strings puras,
@@ -1066,24 +1089,71 @@ def _aba_filiais(fil: pd.DataFrame) -> None:
 
 def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
     st.subheader("Diário de Execução")
-    if ultima:
-        st.success(f"Última execução do scraper: **{ultima:%d/%m/%Y %H:%M}**")
-    else:
-        st.warning("Scraper ainda não foi executado.")
 
+    # ── Seção 1: Histórico de Runs (aba Execucoes) ─────────────────────────
+    exec_df = _carregar_execucoes()
+
+    if not exec_df.empty:
+        ultima_exec = exec_df["data_execucao"].max() if "data_execucao" in exec_df.columns else None
+        if ultima_exec and pd.notna(ultima_exec):
+            st.success(f"Última execução do scraper: **{ultima_exec:%d/%m/%Y %H:%M}**")
+
+        # KPIs da última execução
+        ult = exec_df.sort_values("data_execucao").iloc[-1]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Editais brutos", int(ult.get("brutos", 0)))
+        c2.metric("Após keywords", int(ult.get("apos_keyword", 0)))
+        c3.metric("Após geo", int(ult.get("apos_geo", 0)))
+        c4.metric("Novos gravados", int(ult.get("novos", 0)))
+        c5.metric("Tempo (s)", f"{float(ult.get('tempo_s', 0)):.0f}s")
+
+        st.markdown("##### Histórico de execuções (últimas 50)")
+        # Formatar tabela para exibição
+        disp = exec_df.sort_values("data_execucao", ascending=False).head(50).copy()
+        if "data_execucao" in disp.columns:
+            disp["data_execucao"] = disp["data_execucao"].dt.strftime("%d/%m/%Y %H:%M")
+        disp = disp.rename(columns={
+            "data_execucao": "Data/Hora",
+            "status":        "Status",
+            "brutos":        "Brutos",
+            "apos_keyword":  "Keyword",
+            "apos_geo":      "Geo",
+            "novos":         "Novos",
+            "tempo_s":       "Tempo(s)",
+            "erro_msg":      "Erro",
+        })
+        # Exibe colunas relevantes na ordem certa
+        cols_disp = [c for c in ["Data/Hora", "Status", "Brutos", "Keyword", "Geo", "Novos", "Tempo(s)", "Erro"] if c in disp.columns]
+        st.dataframe(disp[cols_disp], use_container_width=True, hide_index=True)
+
+        # Gráfico de funil ao longo do tempo
+        if {"brutos", "apos_keyword", "apos_geo", "novos"}.issubset(exec_df.columns) and len(exec_df) > 1:
+            st.markdown("##### Funil do scraper ao longo do tempo")
+            funil_chart = exec_df.sort_values("data_execucao").set_index("data_execucao")[
+                ["brutos", "apos_keyword", "apos_geo", "novos"]
+            ]
+            st.line_chart(funil_chart)
+    else:
+        if ultima:
+            st.success(f"Última execução do scraper: **{ultima:%d/%m/%Y %H:%M}**")
+        else:
+            st.warning("Scraper ainda não foi executado.")
+        st.info("Histórico de execuções não disponível ainda. Será preenchido na próxima execução do scraper.")
+
+    # ── Seção 2: Editais por dia ────────────────────────────────────────────
     if ed.empty or "data_execucao" not in ed.columns:
-        st.info("Sem histórico para exibir.")
         return
 
+    st.markdown("---")
     por_dia = ed.groupby(ed["data_execucao"].dt.date).agg(
         editais=("numero_controle_pncp", "count"),
         valor=("valor_estimado", "sum"),
     ).reset_index().rename(columns={"data_execucao": "data"})
     por_dia["valor_fmt"] = por_dia["valor"].apply(_money)
 
-    st.markdown("##### Editais por dia")
+    st.markdown("##### Editais qualificados por dia")
     st.bar_chart(por_dia.set_index("data")["editais"])
-    st.markdown("##### Valor agregado por dia")
+    st.markdown("##### Valor estimado por dia")
     st.dataframe(por_dia[["data", "editais", "valor_fmt"]], use_container_width=True, hide_index=True)
 
 
