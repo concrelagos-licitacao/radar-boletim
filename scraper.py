@@ -53,7 +53,7 @@ RAIO_USINA_KM = 70
 RAIO_PEDREIRA_KM = 700
 
 ESTADOS_CONCRETO = {"MG", "SP", "ES", "RJ", "PR", "BA"}
-ESTADOS_BRITA    = {"MG", "SP", "RJ", "ES", "PR", "BA"}  # expandido (era só RJ)
+ESTADOS_BRITA    = {"RJ"}  # brita somente no Rio de Janeiro
 
 # Palavras-chave organizadas por SCORE DE CONFIANÇA (3=CERTO, 2=PROVÁVEL, 1=POSSÍVEL).
 # A filtragem percorre do score mais alto para o mais baixo e para no primeiro match.
