@@ -356,7 +356,7 @@ def _build_gspread_client():
 
 
 def _gemini_client():
-    """Retorna modelo Gemini configurado. Lê chave de st.secrets ou variável de ambiente.
+    """Retorna cliente Gemini configurado (novo SDK google-genai>=1.0).
 
     Usa gemini-2.0-flash — gratuito (15 req/min, 1M tokens/dia no tier Free).
     Chave obtida em https://aistudio.google.com/app/apikey (projeto concrelagos-hub).
@@ -370,9 +370,8 @@ def _gemini_client():
     if not key:
         return None
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=key)
-        return genai.GenerativeModel("gemini-2.0-flash")
+        from google import genai
+        return genai.Client(api_key=key)
     except ImportError:
         return None
 
@@ -516,8 +515,8 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         return cached
 
     # 2) Precisa do cliente Gemini (gratuito)
-    model = _gemini_client()
-    if model is None:
+    client = _gemini_client()
+    if client is None:
         st.error("GEMINI_API_KEY não configurada. Obtenha grátis em aistudio.google.com/app/apikey e configure em Streamlit → Settings → Secrets → [gemini] api_key.")
         return None
 
@@ -569,7 +568,10 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
         raw = response.text.strip()
         # Remove possível bloco markdown ```json ... ```
         if raw.startswith("```"):
