@@ -245,6 +245,14 @@ st.markdown(
     }
     .cl-header-title { font-size: 1.45rem; font-weight: 700; }
     .cl-header-sub   { font-size: 0.85rem; opacity: 0.85; }
+    /* Cards lidos */
+    .cl-edital-card-lido { opacity: 0.52; border-left: 4px solid #16A34A; }
+    .cl-lido-badge {
+        background: #DCFCE7; color: #15803D;
+        font-size: 0.7rem; font-weight: 700;
+        padding: 0.2rem 0.6rem; border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -419,6 +427,64 @@ def _carregar_execucoes() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _lidos_set() -> set:
+    """Retorna o set de num_controle_pncp marcados como lidos (em session_state).
+    Inicializa fazendo leitura do Sheets na primeira chamada da sessão."""
+    if "lidos_set" not in st.session_state:
+        try:
+            gc = _build_gspread_client()
+            sh = gc.open_by_key(_get_sheet_id())
+            try:
+                ws = sh.worksheet("Lidos")
+                vals = ws.col_values(1)  # primeira coluna
+                # Remove cabeçalho se existir
+                lidos = {v.strip() for v in vals if v.strip() and v.strip() != "numero_controle_pncp"}
+            except Exception:
+                lidos = set()
+        except Exception:
+            lidos = set()
+        st.session_state["lidos_set"] = lidos
+    return st.session_state["lidos_set"]
+
+
+def _marcar_lido(num_controle: str) -> None:
+    """Adiciona num_controle à aba 'Lidos' do Sheets e ao session_state."""
+    lidos = _lidos_set()
+    if num_controle in lidos:
+        return
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Lidos", rows=2000, cols=1)
+        # Garante cabeçalho
+        header = ws.acell("A1").value
+        if not header or header.strip() != "numero_controle_pncp":
+            ws.update("A1", [["numero_controle_pncp"]])
+        ws.append_row([num_controle], value_input_option="USER_ENTERED")
+        lidos.add(num_controle)
+        st.session_state["lidos_set"] = lidos
+    except Exception as exc:
+        st.toast(f"Erro ao salvar no Sheets: {exc}", icon="⚠️")
+
+
+def _desmarcar_lido(num_controle: str) -> None:
+    """Remove num_controle da aba 'Lidos' do Sheets e do session_state."""
+    lidos = _lidos_set()
+    if num_controle not in lidos:
+        return
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = sh.worksheet("Lidos")
+        cell = ws.find(num_controle)
+        if cell:
+            ws.delete_rows(cell.row)
+        lidos.discard(num_controle)
+        st.session_state["lidos_set"] = lidos
+    except Exception as exc:
+        st.toast(f"Erro ao remover do Sheets: {exc}", icon="⚠️")
+
+
 @st.cache_data(ttl=300, show_spinner="Carregando dados da planilha...")
 def _carregar_dados() -> tuple[pd.DataFrame, pd.DataFrame, datetime | None]:
     """Carrega abas Filiais + Novas Licitações via get_all_values (strings puras,
@@ -574,7 +640,8 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         st.warning("PDF sem texto extraível (provavelmente escaneado). Análise IA não disponível.")
         return None
 
-    # 4) Chama Gemini (gratuito — gemini-2.0-flash, 15 req/min, 1M tokens/dia)
+    # 4) Chama Gemini — tenta gemini-1.5-flash primeiro (quota separada),
+    #    depois gemini-2.0-flash como fallback.
     prompt = f"""Analise este edital público brasileiro de fornecimento de concreto usinado ou brita.
 Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
 {{
@@ -590,11 +657,32 @@ Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
 Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
+    response = None
+    _MODELOS_GEMINI = ["gemini-1.5-flash", "gemini-2.0-flash"]
+    for _modelo in _MODELOS_GEMINI:
+        try:
+            response = client.models.generate_content(model=_modelo, contents=prompt)
+            break
+        except Exception as _exc:
+            _exc_str = str(_exc)
+            if "429" in _exc_str or "RESOURCE_EXHAUSTED" in _exc_str:
+                continue  # tenta próximo modelo
+            # Erro diferente de quota — mostra e para
+            st.error(f"Erro ao chamar Gemini API ({_modelo}): {_exc}")
+            return None
+
+    if response is None:
+        st.warning(
+            "⚠️ **Cota gratuita do Gemini esgotada** para todos os modelos disponíveis. "
+            "Isso acontece quando muitas análises são feitas no mesmo dia. "
+            "**Soluções:** (1) Aguarde até amanhã (cota renova às 00h UTC); "
+            "(2) Gere uma nova chave API gratuita em outro projeto em "
+            "[aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) "
+            "e atualize o Streamlit Secrets → `[gemini] api_key`."
         )
+        return None
+
+    try:
         raw = response.text.strip()
         # Remove possível bloco markdown ```json ... ```
         if raw.startswith("```"):
@@ -607,7 +695,7 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
         st.warning(f"Gemini retornou JSON inválido: {exc}. Tente novamente.")
         return None
     except Exception as exc:
-        st.error(f"Erro ao chamar Gemini API: {exc}")
+        st.error(f"Erro ao processar resposta do Gemini: {exc}")
         return None
 
     # 5) Salva no cache e retorna
@@ -660,14 +748,14 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
     else:
         score_sel = []
 
-    valor_min = float(ed["valor_estimado"].min()) if not ed.empty and "valor_estimado" in ed.columns else 180_000.0
+    valor_min = float(ed["valor_estimado"].min()) if not ed.empty and "valor_estimado" in ed.columns else 0.0
     valor_max = float(ed["valor_estimado"].max()) if not ed.empty and "valor_estimado" in ed.columns else 10_000_000.0
     valor_range = st.sidebar.slider(
         "Valor estimado (R$)",
-        min_value=180_000.0,
+        min_value=0.0,
         max_value=max(valor_max, 1_000_000.0),
-        value=(180_000.0, max(valor_max, 1_000_000.0)),
-        step=50_000.0,
+        value=(0.0, max(valor_max, 1_000_000.0)),
+        step=10_000.0,
         format="R$ %.0f",
     )
 
@@ -679,6 +767,12 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
     # Quando a abertura do edital for futura, ainda assim mostra.
     dt_de = st.sidebar.date_input("De", value=hoje - timedelta(days=365))
     dt_ate = st.sidebar.date_input("Até", value=hoje + timedelta(days=180))
+
+    ocultar_lidos = st.sidebar.checkbox(
+        "🙈 Ocultar editais já lidos",
+        value=False,
+        help="Esconde editais marcados com o ícone 👁️ na aba Editais",
+    )
 
     st.sidebar.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
     if st.sidebar.button("🔄 Recarregar dados", use_container_width=True):
@@ -697,6 +791,7 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
         "dist_lim": dist_lim,
         "dt_de": dt_de,
         "dt_ate": dt_ate,
+        "ocultar_lidos": ocultar_lidos,
     }
 
 
@@ -717,6 +812,10 @@ def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
         df = df[df["distancia_km"] <= filtros["dist_lim"]]
     if "data_abertura" in df.columns:
         df = df[(df["data_abertura"].dt.date >= filtros["dt_de"]) & (df["data_abertura"].dt.date <= filtros["dt_ate"])]
+    if filtros.get("ocultar_lidos") and "numero_controle_pncp" in df.columns:
+        lidos = _lidos_set()
+        if lidos:
+            df = df[~df["numero_controle_pncp"].isin(lidos)]
     return df
 
 
@@ -926,6 +1025,12 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         itens_enc = str(d.get("itens_encontrados") or "").strip()
         keyword_trig = str(d.get("keyword_trigger") or "").strip()
 
+        # Estado "lido"
+        num_controle = str(d.get("numero_controle_pncp") or "")
+        ja_lido = num_controle in _lidos_set()
+        card_extra_class = "cl-edital-card-lido" if ja_lido else ""
+        lido_badge_html = '<span class="cl-lido-badge">✓ LIDO</span>' if ja_lido else ""
+
         # Score de confiança
         try:
             score_val = int(d.get("score") or 0)
@@ -963,13 +1068,15 @@ def _aba_editais(ed: pd.DataFrame) -> None:
 
         modal_suffix = f" · {modalidade}" if modalidade else ""
         html = (
-            f'<div class="cl-edital-card">'
+            f'<div class="cl-edital-card {card_extra_class}">'
             f'<div class="cl-edital-header">'
             f'<div style="display:flex;align-items:center;gap:0.5rem;">'
             f'<div class="cl-edital-num">{idx}</div>'
             f'{tag_score_html}'
             f'</div>'
-            f'{tag_urgente_html}'
+            f'<div style="display:flex;align-items:center;gap:0.5rem;">'
+            f'{tag_urgente_html}{lido_badge_html}'
+            f'</div>'
             f'</div>'
             f'<div class="cl-edital-body">'
             f'<div class="cl-edital-objeto"><b>Objeto:</b> {objeto[:400]}</div>'
@@ -995,6 +1102,15 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         st.markdown(html, unsafe_allow_html=True)
 
         # ----- Botões Streamlit (interativos) -----
+        _lbl_lido = "✅ Lido" if ja_lido else "👁️ Marcar como lido"
+        _hlp_lido = "Clique para desmarcar como lido" if ja_lido else "Marca este edital como revisado"
+        if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", help=_hlp_lido):
+            if ja_lido:
+                _desmarcar_lido(num_controle)
+            else:
+                _marcar_lido(num_controle)
+            st.rerun()
+
         if st.button("🤖 Analisar com IA", key=f"ia_{idx}_{num_edital}",
                      help="Gemini lê o PDF e extrai: produto, quantidade, prazo e recomendação"):
             with st.spinner("Baixando edital e consultando Gemini..."):
