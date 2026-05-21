@@ -1282,7 +1282,19 @@ def main() -> None:
     filtros = _sidebar_filtros(ed, fil)
     ed_f = _aplica_filtros(ed, filtros)
 
-    ultima_str = ultima.strftime("%d/%m/%Y %H:%M") if ultima else "—"
+    # Usa a data real da última execução do scraper (aba Execucoes),
+    # com fallback para a data do último edital encontrado.
+    exec_df = _carregar_execucoes()
+    if not exec_df.empty and "data_execucao" in exec_df.columns:
+        ultima_exec = exec_df["data_execucao"].max()
+        ultima_str = ultima_exec.strftime("%d/%m/%Y %H:%M") if pd.notna(ultima_exec) else "—"
+        novos_ultima = int(exec_df.sort_values("data_execucao").iloc[-1].get("novos", 0))
+        status_txt = f"{novos_ultima} novo(s)" if novos_ultima else "0 novos"
+        sub_exec = f'<div class="cl-header-sub" style="font-size:0.75rem;opacity:0.75;">{status_txt} na última execução</div>'
+    else:
+        ultima_str = ultima.strftime("%d/%m/%Y %H:%M") if ultima else "—"
+        sub_exec = ""
+
     st.markdown(
         f"""
         <div class="cl-header-bar">
@@ -1293,6 +1305,7 @@ def main() -> None:
             <div style="text-align:right;">
                 <div class="cl-header-sub">Última varredura</div>
                 <div style="font-weight:600;">{ultima_str}</div>
+                {sub_exec}
             </div>
         </div>
         """,

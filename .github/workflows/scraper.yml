@@ -8,6 +8,15 @@ on:
   schedule:
     - cron: '0 9,15,21 * * *'
   workflow_dispatch:    # permite rodar manualmente pelo botão "Run workflow"
+    inputs:
+      data_inicial:
+        description: 'Data inicial (YYYY-MM-DD) — deixe vazio para usar JANELA_DIAS'
+        required: false
+        default: ''
+      data_final:
+        description: 'Data final (YYYY-MM-DD) — deixe vazio para usar JANELA_DIAS'
+        required: false
+        default: ''
 
 concurrency:
   group: scraper
@@ -38,6 +47,9 @@ jobs:
       NOTIFICACAO_EMAIL_SENHA: ${{ secrets.NOTIFICACAO_EMAIL_SENHA }}
       NOTIFICACAO_EMAIL_PARA:  ${{ secrets.NOTIFICACAO_EMAIL_PARA }}
       PYTHONIOENCODING: 'utf-8'
+      # Backfill manual: preenchidos pelo workflow_dispatch inputs
+      PNCP_DATA_INICIAL: ${{ github.event.inputs.data_inicial }}
+      PNCP_DATA_FINAL:   ${{ github.event.inputs.data_final }}
 
     steps:
       - name: Checkout do repositório
