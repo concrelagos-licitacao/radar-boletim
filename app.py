@@ -475,7 +475,7 @@ def _desmarcar_lido(num_controle: str) -> None:
     try:
         gc = _build_gspread_client()
         sh = gc.open_by_key(_get_sheet_id())
-        ws = sh.worksheet("Lidos")
+        ws = _get_or_create_worksheet(sh, "Lidos", rows=2000, cols=1)
         cell = ws.find(num_controle)
         if cell:
             ws.delete_rows(cell.row)
@@ -729,7 +729,10 @@ def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
     st.sidebar.title("🔎 Filtros")
     st.sidebar.caption("Aplicados a todas as abas")
 
-    ufs = sorted(set(ed["uf"].dropna().tolist() if "uf" in ed.columns and not ed.empty else []) | set(fil["uf"].dropna().tolist()))
+    ufs = sorted(
+        set(ed["uf"].dropna().tolist()  if "uf" in ed.columns  and not ed.empty  else [])
+        | set(fil["uf"].dropna().tolist() if "uf" in fil.columns and not fil.empty else [])
+    )
     uf_sel = st.sidebar.multiselect("UF", ufs, default=ufs)
 
     materiais = sorted(set(ed["material"].dropna().tolist())) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
@@ -1217,11 +1220,11 @@ def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
         # KPIs da última execução
         ult = exec_df.sort_values("data_execucao").iloc[-1]
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Editais brutos", int(ult.get("brutos", 0)))
-        c2.metric("Após keywords", int(ult.get("apos_keyword", 0)))
-        c3.metric("Após geo", int(ult.get("apos_geo", 0)))
-        c4.metric("Novos gravados", int(ult.get("novos", 0)))
-        c5.metric("Tempo (s)", f"{float(ult.get('tempo_s', 0)):.0f}s")
+        c1.metric("Editais brutos",  int(ult["brutos"]        if "brutos"        in ult.index else 0))
+        c2.metric("Após keywords",   int(ult["apos_keyword"]  if "apos_keyword"  in ult.index else 0))
+        c3.metric("Após geo",        int(ult["apos_geo"]      if "apos_geo"      in ult.index else 0))
+        c4.metric("Novos gravados",  int(ult["novos"]         if "novos"         in ult.index else 0))
+        c5.metric("Tempo (s)", f"{float(ult['tempo_s'] if 'tempo_s' in ult.index else 0):.0f}s")
 
         st.markdown("##### Histórico de execuções (últimas 50)")
         # Formatar tabela para exibição
@@ -1288,7 +1291,8 @@ def main() -> None:
     if not exec_df.empty and "data_execucao" in exec_df.columns:
         ultima_exec = exec_df["data_execucao"].max()
         ultima_str = ultima_exec.strftime("%d/%m/%Y %H:%M") if pd.notna(ultima_exec) else "—"
-        novos_ultima = int(exec_df.sort_values("data_execucao").iloc[-1].get("novos", 0))
+        _ult_row = exec_df.sort_values("data_execucao").iloc[-1]
+        novos_ultima = int(_ult_row["novos"] if "novos" in _ult_row.index else 0)
         status_txt = f"{novos_ultima} novo(s)" if novos_ultima else "0 novos"
         sub_exec = f'<div class="cl-header-sub" style="font-size:0.75rem;opacity:0.75;">{status_txt} na última execução</div>'
     else:

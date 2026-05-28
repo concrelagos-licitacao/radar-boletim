@@ -176,6 +176,8 @@ OUTPUT_HEADER = [
     "score_label",            # "POSSÍVEL" / "PROVÁVEL" / "CERTO"
     "keyword_trigger",        # keyword que disparou o match
     "itens_encontrados",      # item PNCP relevante encontrado (somente para score=1 enriquecido)
+    # -- origem do edital (adicionado na Fase 10: multi-fonte) --
+    "fonte",                  # "PNCP", "COMPRASNET", "BLL"
 ]
 
 # Mapeamento de modalidade PNCP → sigla e nome
@@ -494,6 +496,7 @@ def _extrair_edital(item: dict) -> dict:
         "data_encerramento": item.get("dataEncerramentoProposta") or "",
         "link_pncp": link_pncp_pagina,
         "link_sistema_origem": item.get("linkSistemaOrigem") or "",
+        "fonte": "PNCP",
         # campos internos para enriquecimento por itens (não gravados diretamente)
         "_cnpj": cnpj,
         "_ano_compra": str(ano) if ano else "",
@@ -577,7 +580,7 @@ def _buscar_itens_edital(cnpj: str, ano: str, seq: str) -> list[str]:
             resp.raise_for_status()
             payload = resp.json()
         except (requests.RequestException, ValueError) as exc:
-            logging.debug("Items endpoint erro para %s/%s/%s p%d: %s", cnpj, ano, seq, pagina, exc)
+            logging.warning("Items endpoint erro para %s/%s/%s p%d: %s", cnpj, ano, seq, pagina, exc)
             break
 
         itens = payload.get("data") or []
@@ -689,7 +692,7 @@ def qualificar_por_distancia(
         if (
             pedreiras
             and ed.get("material") == "brita"
-            and ed["valor_estimado"] > VALOR_MINIMO_PEDREIRA
+            and ed["valor_estimado"] >= VALOR_MINIMO_PEDREIRA
         ):
             distancia_km, mais_proxima = _menor_distancia(origem, pedreiras)
             if distancia_km is not None and distancia_km <= RAIO_PEDREIRA_KM:
@@ -833,6 +836,7 @@ def _edital_para_linha(ed: dict, ts: str) -> list:
         ed.get("score_label", ""),
         ed.get("keyword_trigger", ""),
         ed.get("itens_encontrados", ""),
+        ed.get("fonte", "PNCP"),
     ]
 
 
@@ -846,6 +850,275 @@ def _fallback_csv(qualificados: list[dict]) -> None:
         for ed in qualificados:
             w.writerow(_edital_para_linha(ed, ts))
     logging.error("Fallback gravado em %s — verifique conectividade e re-execute.", arq)
+
+
+# =========================================================================
+# FONTES ADICIONAIS — ComprasNet e BLL (Fase 10: multi-fonte)
+# =========================================================================
+
+# ComprasNet — API pública sem autenticação (Dados Abertos do Governo Federal).
+# Cobre licitações federais e estaduais que ainda não migraram para o PNCP.
+COMPRASNET_BASE_URL = "https://compras.dados.gov.br/licitacoes/v1/licitacoes"
+# Modalidades relevantes: 1=Concorrência, 5=Pregão Presencial, 6=Pregão Eletrônico
+# (o ComprasNet usa seu próprio esquema de códigos, diferente do PNCP)
+COMPRASNET_MODALIDADES = [1, 5, 6]
+
+# BLL — endpoint JSON interno do portal (não documentado oficialmente).
+# Cobre ~5.000 municípios em SP/MG/PR/RJ que usam a plataforma BLL.
+BLL_BUSCA_URL = "https://bll.org.br/api/oportunidades/busca"
+# Palavras-chave enviadas diretamente à BLL (buscam no título/objeto do edital)
+BLL_KEYWORDS = ["concreto", "brita", "material de construcao"]
+
+
+def _normalizar_comprasnet(item: dict) -> dict:
+    """Converte um registro da API ComprasNet para o schema interno do scraper."""
+    # Campos observados na API dadosabertos.compras.gov.br:
+    # unidade: { codigoUnidade, nomeUnidade, municipio, uf, municipioIbge }
+    # licitacao: { numeroLicitacao, modalidadeCompra, descricaoObjeto,
+    #              dataPublicacaoEdital, dataAberturaProposta, valorEstimado,
+    #              linkEdital, linkSistemaOrigem, ... }
+    unidade = item.get("unidade") or {}
+    municipio_raw = unidade.get("municipio") or item.get("municipio") or ""
+    uf_raw = (unidade.get("uf") or item.get("uf") or "").upper()
+
+    valor_raw = item.get("valorEstimado") or item.get("valorTotalEstimado") or 0
+    try:
+        valor = float(valor_raw)
+    except (TypeError, ValueError):
+        valor = 0.0
+
+    data_abertura = (
+        item.get("dataAberturaProposta") or
+        item.get("dataAberturaPropostas") or
+        item.get("dataPublicacaoEdital") or ""
+    )
+    # Identificador único: usa numero_licitacao + uasg se não houver controle PNCP
+    uasg = str(item.get("codigoUasg") or item.get("uasg") or "")
+    numero = str(item.get("numeroLicitacao") or item.get("numero") or "")
+    modalidade_cod = str(item.get("codigoModalidadeCompra") or item.get("modalidade") or "")
+    id_interno = f"CN-{uasg}-{numero}" if uasg and numero else ""
+
+    link_orig = item.get("linkEdital") or item.get("linkSistemaOrigem") or ""
+    objeto = item.get("descricaoObjeto") or item.get("objeto") or ""
+    orgao_nome = (
+        item.get("nomeOrgao") or item.get("orgao") or
+        unidade.get("nomeUnidade") or ""
+    )
+
+    return {
+        "numero_controle_pncp": item.get("numeroControlePNCP") or id_interno,
+        "numero_edital": numero,
+        "modalidade": item.get("descricaoModalidade") or f"Modalidade {modalidade_cod}",
+        "orgao": orgao_nome,
+        "esfera": item.get("esfera") or "F",  # ComprasNet é majoritariamente federal
+        "municipio": municipio_raw,
+        "uf": uf_raw,
+        "objeto": objeto,
+        "valor_estimado": valor,
+        "data_abertura": data_abertura,
+        "data_encerramento": item.get("dataEncerramentoProposta") or "",
+        "link_pncp": item.get("linkPncp") or "",
+        "link_sistema_origem": link_orig,
+        "fonte": "COMPRASNET",
+        "_cnpj": "",
+        "_ano_compra": "",
+        "_seq_compra": "",
+    }
+
+
+def _coletar_comprasnet(data_inicial: date, data_final: date) -> list[dict]:
+    """Coleta editais do ComprasNet (federais/estaduais pré-migração PNCP).
+
+    Falha silenciosa: se a API estiver indisponível ou retornar estrutura inesperada,
+    loga WARNING e retorna lista vazia — o scraper continua normalmente com PNCP.
+    """
+    coletados: list[dict] = []
+    di = data_inicial.strftime("%Y-%m-%d")
+    df = data_final.strftime("%Y-%m-%d")
+
+    for mod in COMPRASNET_MODALIDADES:
+        pagina = 1
+        while True:
+            try:
+                resp = requests.get(
+                    COMPRASNET_BASE_URL,
+                    params={
+                        "dataPublicacaoEdital_inicial": di,
+                        "dataPublicacaoEdital_final": df,
+                        "codigoModalidadeCompra": mod,
+                        "pagina": pagina,
+                    },
+                    timeout=30,
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status_code == 404:
+                    break  # modalidade sem dados na janela
+                resp.raise_for_status()
+                payload = resp.json()
+            except requests.RequestException as exc:
+                logging.warning("ComprasNet API erro (mod=%s p=%d): %s — pulando ComprasNet.", mod, pagina, exc)
+                return coletados  # falha silenciosa, preserva o que já coletou
+            except ValueError as exc:
+                logging.warning("ComprasNet JSON inválido (mod=%s p=%d): %s", mod, pagina, exc)
+                break
+
+            # A API pode retornar os dados em diferentes envelopes
+            itens = (
+                payload.get("_embedded", {}).get("licitacoes") or
+                payload.get("result") or
+                payload.get("data") or
+                (payload if isinstance(payload, list) else [])
+            )
+            if not itens:
+                break
+
+            for item in itens:
+                try:
+                    coletados.append(_normalizar_comprasnet(item))
+                except Exception as exc:
+                    logging.debug("ComprasNet: edital ignorado por estrutura incompleta: %s", exc)
+
+            # Paginação: verifica se há próxima página
+            total_pags = (
+                payload.get("page", {}).get("totalPages") or
+                payload.get("totalPaginas") or
+                1
+            )
+            if pagina >= int(total_pags) or pagina >= PNCP_MAX_PAGINAS:
+                break
+            pagina += 1
+            time.sleep(0.3)
+
+    if coletados:
+        logging.info("ComprasNet retornou %d editais brutos na janela %s a %s.", len(coletados), di, df)
+    else:
+        logging.info("ComprasNet: 0 editais brutos (API pode ter estrutura diferente — verificar logs).")
+    return coletados
+
+
+def _normalizar_bll(item: dict) -> dict:
+    """Converte um registro da API interna da BLL para o schema interno do scraper."""
+    valor_raw = item.get("valorEstimado") or item.get("valor") or 0
+    try:
+        valor = float(str(valor_raw).replace(",", ".").replace("R$", "").replace(" ", ""))
+    except (TypeError, ValueError):
+        valor = 0.0
+
+    municipio_raw = item.get("municipio") or item.get("cidade") or ""
+    uf_raw = (item.get("uf") or item.get("estado") or "").upper()
+    if len(uf_raw) > 2:
+        uf_raw = uf_raw[:2]
+
+    id_bll = str(item.get("id") or item.get("codigo") or item.get("numeroEdital") or "")
+    link = item.get("link") or item.get("url") or item.get("linkEdital") or ""
+
+    return {
+        "numero_controle_pncp": f"BLL-{id_bll}" if id_bll else "",
+        "numero_edital": item.get("numeroEdital") or item.get("numero") or "",
+        "modalidade": item.get("modalidade") or item.get("tipoLicitacao") or "BLL",
+        "orgao": item.get("orgao") or item.get("nomeOrgao") or item.get("entidade") or "",
+        "esfera": item.get("esfera") or "M",  # BLL cobre principalmente municípios
+        "municipio": municipio_raw,
+        "uf": uf_raw,
+        "objeto": item.get("objeto") or item.get("descricao") or item.get("titulo") or "",
+        "valor_estimado": valor,
+        "data_abertura": item.get("dataAbertura") or item.get("dataPublicacao") or "",
+        "data_encerramento": item.get("dataEncerramento") or item.get("dataFim") or "",
+        "link_pncp": "",
+        "link_sistema_origem": link,
+        "fonte": "BLL",
+        "_cnpj": "",
+        "_ano_compra": "",
+        "_seq_compra": "",
+    }
+
+
+def _coletar_bll(data_inicial: date, data_final: date) -> list[dict]:
+    """Coleta editais da BLL via endpoint JSON interno do portal.
+
+    Busca por palavras-chave relevantes (concreto, brita) na janela de datas.
+    Falha silenciosa: se o endpoint estiver indisponível ou bloqueado,
+    loga WARNING e retorna lista vazia.
+    """
+    coletados: list[dict] = []
+    fmt_data = lambda d: d.strftime("%d/%m/%Y")
+    di = fmt_data(data_inicial)
+    df = fmt_data(data_final)
+
+    for kw in BLL_KEYWORDS:
+        pagina = 1
+        while True:
+            try:
+                resp = requests.get(
+                    BLL_BUSCA_URL,
+                    params={
+                        "palavraChave": kw,
+                        "dataInicio": di,
+                        "dataFim": df,
+                        "pagina": pagina,
+                        "itensPorPagina": 50,
+                    },
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; ConcrelagosBot/1.0)",
+                        "Accept": "application/json",
+                    },
+                    timeout=30,
+                )
+                if resp.status_code in (401, 403, 404):
+                    logging.warning(
+                        "BLL API retornou HTTP %d (keyword=%r) — endpoint pode ter mudado. "
+                        "Pulando fonte BLL.", resp.status_code, kw
+                    )
+                    return coletados  # falha silenciosa completa
+                resp.raise_for_status()
+                payload = resp.json()
+            except requests.RequestException as exc:
+                logging.warning("BLL API erro de rede (keyword=%r p=%d): %s — pulando BLL.", kw, pagina, exc)
+                return coletados
+            except ValueError as exc:
+                logging.warning("BLL JSON inválido (keyword=%r p=%d): %s", kw, pagina, exc)
+                break
+
+            itens = (
+                payload.get("itens") or
+                payload.get("data") or
+                payload.get("result") or
+                (payload if isinstance(payload, list) else [])
+            )
+            if not itens:
+                break
+
+            for item in itens:
+                try:
+                    coletados.append(_normalizar_bll(item))
+                except Exception as exc:
+                    logging.debug("BLL: edital ignorado por estrutura incompleta: %s", exc)
+
+            total_pags = payload.get("totalPaginas") or payload.get("totalPages") or 1
+            if pagina >= int(total_pags) or pagina >= PNCP_MAX_PAGINAS:
+                break
+            pagina += 1
+            time.sleep(0.5)
+
+    if coletados:
+        logging.info("BLL retornou %d editais brutos na janela %s a %s.", len(coletados), di, df)
+    return coletados
+
+
+def _deduplicar_fontes(editais: list[dict]) -> list[dict]:
+    """Remove duplicatas entre fontes, priorizando PNCP quando o mesmo edital aparecer em múltiplas fontes."""
+    vistos: set[str] = set()
+    resultado: list[dict] = []
+    for ed in editais:
+        chave = (
+            ed.get("numero_controle_pncp") or
+            ed.get("link_sistema_origem") or
+            (ed.get("objeto", "")[:60] + "|" + ed.get("uf", ""))
+        )
+        if chave and chave not in vistos:
+            vistos.add(chave)
+            resultado.append(ed)
+    return resultado
 
 
 # =========================================================================
@@ -1022,7 +1295,22 @@ def main() -> None:
     pre: list[dict] = []
     brutos: list[dict] = []
     try:
-        brutos = buscar_editais_pncp(data_inicial, data_final)
+        # ---- PNCP (fonte primária) ----
+        brutos_pncp = buscar_editais_pncp(data_inicial, data_final)
+
+        # ---- ComprasNet (fonte secundária: federal/estadual pré-migração) ----
+        brutos_cn = _coletar_comprasnet(data_inicial, data_final)
+
+        # ---- BLL (fonte terciária: municípios SP/MG/PR/RJ) ----
+        brutos_bll = _coletar_bll(data_inicial, data_final)
+
+        # Consolida e deduplica — PNCP tem precedência
+        brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll)
+        logging.info(
+            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d → deduplicado=%d editais brutos",
+            len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos),
+        )
+
         pre = filtrar_por_keyword_estado_valor(brutos)
         pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
         qualificados = qualificar_por_distancia(pre, filiais)
