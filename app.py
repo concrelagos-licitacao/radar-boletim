@@ -253,6 +253,10 @@ st.markdown(
         padding: 0.2rem 0.6rem; border-radius: 4px;
         letter-spacing: 0.04em;
     }
+    /* Badges de origem da licitação */
+    .cl-fonte-pncp       { background:#EFF6FF;color:#1D4ED8;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
+    .cl-fonte-comprasnet { background:#FFF7ED;color:#C2410C;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
+    .cl-fonte-bll        { background:#F5F3FF;color:#6D28D9;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1046,6 +1050,15 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         # Tag URGENTE (canto superior direito)
         tag_urgente_html = '<span class="cl-edital-urgent">URGENTE</span>' if urgente else ""
 
+        # Badge de origem da licitação
+        _fonte_val = str(d.get("fonte") or "PNCP").upper()
+        _fonte_cls = {
+            "PNCP": "cl-fonte-pncp",
+            "COMPRASNET": "cl-fonte-comprasnet",
+            "BLL": "cl-fonte-bll",
+        }.get(_fonte_val, "cl-fonte-pncp")
+        fonte_badge_html = f'<span class="{_fonte_cls}">{_fonte_val}</span>'
+
         # Linha de item encontrado (somente quando preenchido)
         item_enc_html = (
             f'<div style="font-size:0.8rem;color:#374151;margin-top:0.5rem;'
@@ -1092,7 +1105,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'<div><b>Edital:</b> {num_edital}{modal_suffix}</div>'
             f'<div><b>Valor:</b> <span style="color:var(--cl-primary);font-weight:700;">{valor}</span> · '
             f'<span class="cl-tag {tag_material_class}">{material}</span> '
-            f'<span class="cl-tag" style="background:#F3F4F6;color:#1F2937;">{dist_str} de {filial}</span>'
+            f'<span class="cl-tag" style="background:#F3F4F6;color:#1F2937;">{dist_str} de {filial}</span> '
+            f'{fonte_badge_html}'
             f'</div>'
             f'</div>'
             f'</div>'
