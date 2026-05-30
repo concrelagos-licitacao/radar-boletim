@@ -656,10 +656,10 @@ def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
             if hit_concreto_forte:
                 hit, score = hit_concreto_forte, 3
             elif any(k in objeto_norm for k in KEYWORDS_CONCRETO[2]):
-                # "concreto" genérico só conta com contexto de usinado
-                if any(c in objeto_norm for c in CONTEXTO_USINADO):
-                    hit = next(k for k in KEYWORDS_CONCRETO[2] if k in objeto_norm)
-                    score = 2
+                hit = next(k for k in KEYWORDS_CONCRETO[2] if k in objeto_norm)
+                # "concreto" com contexto de usinado = PROVÁVEL; sem contexto =
+                # POSSÍVEL (score 1) para o enriquecimento por itens confirmar via PDF.
+                score = 2 if any(c in objeto_norm for c in CONTEXTO_USINADO) else 1
             elif any(k in objeto_norm for k in KEYWORDS_CONCRETO[1]):
                 hit, score = next(k for k in KEYWORDS_CONCRETO[1] if k in objeto_norm), 1
             if hit:
@@ -726,16 +726,28 @@ def _buscar_itens_edital(cnpj: str, ano: str, seq: str) -> list[str]:
             logging.warning("Items endpoint erro para %s/%s/%s p%d: %s", cnpj, ano, seq, pagina, exc)
             break
 
-        itens = payload.get("data") or []
+        # O endpoint de itens do PNCP pode responder como LISTA (array) OU como
+        # objeto {"data": [...], "totalPaginas": N}. Tratar os dois formatos.
+        if isinstance(payload, list):
+            itens = payload
+            total_pag = 1
+        elif isinstance(payload, dict):
+            itens = payload.get("data") or payload.get("itens") or []
+            total_pag = payload.get("totalPaginas") or 1
+        else:
+            itens, total_pag = [], 1
+
         for it in itens:
-            desc = it.get("descricao") or it.get("descricaoItem") or ""
+            if not isinstance(it, dict):
+                continue
+            desc = it.get("descricao") or it.get("descricaoItem") or it.get("descricaoCompleta") or ""
             if desc:
                 descricoes.append(_normalize(desc))
 
-        total_pag = payload.get("totalPaginas") or 1
         if pagina >= total_pag or not itens:
             break
         pagina += 1
+        time.sleep(0.2)  # pausa leve entre páginas de itens
 
     return descricoes
 
@@ -764,22 +776,27 @@ def enriquecer_com_itens(editais: list[dict]) -> list[dict]:
     promovidos = 0
 
     for ed in candidatos[:limite]:
-        cnpj = ed.get("_cnpj", "")
-        ano = ed.get("_ano_compra", "")
-        seq = ed.get("_seq_compra", "")
-        descricoes = _buscar_itens_edital(cnpj, ano, seq)
+        # Blindagem: um edital problemático NUNCA pode derrubar o pipeline inteiro.
+        try:
+            cnpj = ed.get("_cnpj", "")
+            ano = ed.get("_ano_compra", "")
+            seq = ed.get("_seq_compra", "")
+            descricoes = _buscar_itens_edital(cnpj, ano, seq)
 
-        for desc_norm in descricoes:
-            hit = next((k for k in kw_diretas if k in desc_norm), None)
-            if hit:
-                ed["score"] = 2
-                ed["score_label"] = SCORE_LABEL[2]
-                # Guarda trecho original (denormalizado se possível) para exibir no dashboard
-                ed["itens_encontrados"] = desc_norm[:200]
-                promovidos += 1
-                logging.info("Edital %s promovido a score=2 via item '%s'.",
-                             ed.get("numero_controle_pncp", "?"), hit)
-                break  # basta 1 item para confirmar
+            for desc_norm in descricoes:
+                hit = next((k for k in kw_diretas if k in desc_norm), None)
+                if hit:
+                    ed["score"] = 2
+                    ed["score_label"] = SCORE_LABEL[2]
+                    ed["itens_encontrados"] = desc_norm[:200]
+                    promovidos += 1
+                    logging.info("Edital %s promovido a score=2 via item '%s'.",
+                                 ed.get("numero_controle_pncp", "?"), hit)
+                    break  # basta 1 item para confirmar
+        except Exception as exc:
+            logging.warning("Enriquecimento falhou para %s (ignorado): %s",
+                            ed.get("numero_controle_pncp", "?"), exc)
+            continue
 
     logging.info("Itens consultados para %d edital(is) score=1 — %d promovido(s) a score=2.",
                  limite, promovidos)
