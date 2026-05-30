@@ -900,6 +900,7 @@ def qualificar_por_distancia(
         material = ed.get("material")
         valor = ed.get("valor_estimado") or 0
         local_obra = ""
+        obra_coord = None
 
         # A) qualifica pelo município do ÓRGÃO
         res = _match(origem, material, valor)
@@ -911,7 +912,8 @@ def qualificar_por_distancia(
             if mm:
                 nome_obra = mm.group(1) or mm.group(2)
                 key = nome2key.get(nome_obra) if nome_obra else None
-                r2 = _match(coords_offline.get(key) if key else None, material, valor)
+                obra_coord = coords_offline.get(key) if key else None
+                r2 = _match(obra_coord, material, valor)
                 if r2:
                     res = r2
                     local_obra = f"{key[0].title()}/{key[1]}"
@@ -923,8 +925,11 @@ def qualificar_por_distancia(
             ed["filial_mais_proxima"] = f"{f['nome']} ({f['municipio']}/{f['uf']})"
             ed["distancia_km"] = dist
             ed["local_obra"] = local_obra
-            if origem:
-                ed["latitude"], ed["longitude"] = origem[0], origem[1]
+            # Mapa: prioriza a coord do LOCAL DA OBRA (qdo qualificou por ela);
+            # senão usa a sede do órgão.
+            coord_plot = obra_coord or origem
+            if coord_plot:
+                ed["latitude"], ed["longitude"] = coord_plot[0], coord_plot[1]
             qualificados.append(ed)
             continue
 

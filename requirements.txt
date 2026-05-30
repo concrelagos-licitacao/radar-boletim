@@ -7,7 +7,7 @@ googlemaps>=4.10        # Maps (requer billing); só usado se chave funcionar
 geopy>=2.4              # Nominatim (OpenStreetMap) — fallback gratuito
 
 # Frontend (Streamlit dashboard - Fase 4)
-streamlit>=1.36
+streamlit>=1.50          # width='stretch'/'content' (use_container_width removido)
 pandas>=2.0
 pydeck>=0.9
 

@@ -354,7 +354,7 @@ def _check_login() -> bool:
 
     with st.form("login"):
         senha = st.text_input("Senha de acesso", type="password", placeholder="Informe a senha")
-        ok = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+        ok = st.form_submit_button("Entrar", type="primary", width='stretch')
     if ok:
         if senha == senha_correta:
             st.session_state["autenticado"] = True
@@ -923,10 +923,10 @@ def _sidebar_acoes() -> None:
     No modelo ConLicitação os filtros ficam no topo do Boletim, não na lateral."""
     st.sidebar.markdown("### ⚙️ Painel")
     st.sidebar.caption("Concrelagos Intelligence Hub")
-    if st.sidebar.button("🔄 Recarregar dados", use_container_width=True):
+    if st.sidebar.button("🔄 Recarregar dados", width='stretch'):
         st.cache_data.clear()
         st.rerun()
-    if st.sidebar.button("🚪 Sair", use_container_width=True):
+    if st.sidebar.button("🚪 Sair", width='stretch'):
         st.session_state["autenticado"] = False
         st.rerun()
 
@@ -992,7 +992,7 @@ def _aba_visao_geral(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
         if "valor_estimado" in ed.columns:
             top = ed.nlargest(5, "valor_estimado")[["orgao", "municipio", "uf", "valor_estimado", "material"]]
             top["valor_estimado"] = top["valor_estimado"].apply(_money)
-            st.dataframe(top, use_container_width=True, hide_index=True)
+            st.dataframe(top, width='stretch', hide_index=True)
 
 
 def _aba_mapa(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
@@ -1043,7 +1043,7 @@ def _aba_mapa(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
         map_style="light",
         tooltip={"html": "<b>{nome}</b><br/>{municipio}/{uf}<br/>{tipo}", "style": {"color": "white"}},
     )
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(deck, width='stretch')
 
     leg_a, leg_b, leg_c = st.columns(3)
     leg_a.markdown('<span class="cl-tag cl-tag-usina">●  Usinas (raio 70 km)</span>', unsafe_allow_html=True)
@@ -1117,7 +1117,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         ordem = st.selectbox("Ordenar por", ["Mais recente", "Maior valor", "Menor distância", "Data abertura"])
 
     # --- Demais filtros recolhidos (deixa o topo limpo) ---
-    with st.popover("⚙️ Mais filtros", use_container_width=False):
+    with st.popover("⚙️ Mais filtros", width='content'):
         mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
         mat_sel = st.multiselect("Material", mats, default=mats)
         _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
@@ -1196,7 +1196,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 "📊 Excel", data=_exportar_excel(df),
                 file_name=f"licitacoes_{datetime.now():%Y%m%d}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width='stretch',
             )
         except Exception:
             pass
@@ -1204,11 +1204,11 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         st.download_button(
             "📥 CSV", data=df.to_csv(index=False).encode("utf-8"),
             file_name=f"licitacoes_{datetime.now():%Y%m%d}.csv", mime="text/csv",
-            use_container_width=True,
+            width='stretch',
         )
 
     if modo == "Tabela":
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
         return
 
     # ----- Paginação -----
@@ -1410,20 +1410,20 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         bcol1, bcol2, bcol3, _bspace = st.columns([1.2, 1.3, 1.1, 5])
         with bcol1:
             _lbl_lido = "✅ Lido" if ja_lido else "👁️ Lido"
-            if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", use_container_width=True,
+            if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", width='stretch',
                          help="Marcar/desmarcar como revisada"):
                 _desmarcar_lido(num_controle) if ja_lido else _marcar_lido(num_controle)
                 st.rerun()
         with bcol2:
             _lbl_fav = "★ Favorita" if ja_fav else "☆ Favoritar"
-            if st.button(_lbl_fav, key=f"fav_{idx}_{num_controle}", use_container_width=True,
+            if st.button(_lbl_fav, key=f"fav_{idx}_{num_controle}", width='stretch',
                          help="Marcar/desmarcar favorita"):
                 _desmarcar_fav(num_controle) if ja_fav else _marcar_fav(num_controle)
                 st.rerun()
         _ia_click = False
         with bcol3:
             _ia_click = st.button("🤖 IA", key=f"ia_{idx}_{num_edital}",
-                                  use_container_width=True,
+                                  width='stretch',
                                   help="Gemini lê o PDF e extrai produto, quantidade, prazo e recomendação")
         if _ia_click:
             with st.spinner("Baixando edital e consultando Gemini..."):
@@ -1471,7 +1471,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         nav1, nav2, nav3 = st.columns([1, 2, 1])
         with nav1:
             if pagina > 0:
-                if st.button("← Anterior", use_container_width=True):
+                if st.button("← Anterior", width='stretch'):
                     st.session_state["page_editais"] = pagina - 1
                     st.rerun()
         with nav2:
@@ -1482,7 +1482,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             )
         with nav3:
             if pagina < n_paginas - 1:
-                if st.button("Próxima →", use_container_width=True):
+                if st.button("Próxima →", width='stretch'):
                     st.session_state["page_editais"] = pagina + 1
                     st.rerun()
 
@@ -1553,7 +1553,7 @@ def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
         })
         # Exibe colunas relevantes na ordem certa
         cols_disp = [c for c in ["Data/Hora", "Status", "Brutos", "Keyword", "Geo", "Novos", "Tempo(s)", "Erro"] if c in disp.columns]
-        st.dataframe(disp[cols_disp], use_container_width=True, hide_index=True)
+        st.dataframe(disp[cols_disp], width='stretch', hide_index=True)
 
         # Gráfico de funil ao longo do tempo
         if {"brutos", "apos_keyword", "apos_geo", "novos"}.issubset(exec_df.columns) and len(exec_df) > 1:
@@ -1583,7 +1583,7 @@ def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
     st.markdown("##### Editais qualificados por dia")
     st.bar_chart(por_dia.set_index("data")["editais"])
     st.markdown("##### Valor estimado por dia")
-    st.dataframe(por_dia[["data", "editais", "valor_fmt"]], use_container_width=True, hide_index=True)
+    st.dataframe(por_dia[["data", "editais", "valor_fmt"]], width='stretch', hide_index=True)
 
 
 # ===== Main =====
