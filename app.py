@@ -875,8 +875,31 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
             )
         return None
 
+    # Extrai o texto com robustez: no SDK novo, response.text pode ser None ou
+    # lançar exceção quando a resposta é bloqueada/cortada (finish_reason
+    # SAFETY/MAX_TOKENS/RECITATION). Antes isso virava um "erro" genérico confuso.
+    raw = ""
     try:
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
+    except Exception:
+        raw = ""
+    if not raw:
+        motivo = None
+        try:
+            _cand = (getattr(response, "candidates", None) or [None])[0]
+            _partes = getattr(getattr(_cand, "content", None), "parts", None) or []
+            raw = "".join((getattr(p, "text", "") or "") for p in _partes).strip()
+            motivo = getattr(_cand, "finish_reason", None)
+        except Exception:
+            pass
+        if not raw:
+            st.warning(
+                f"A IA não retornou texto utilizável (motivo: {motivo or 'desconhecido'}). "
+                "Costuma ser resposta cortada ou bloqueada — clique em IA novamente."
+            )
+            return None
+
+    try:
         # Remove possível bloco markdown ```json ... ```
         if raw.startswith("```"):
             raw = raw.split("```")[1]
