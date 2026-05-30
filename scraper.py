@@ -1482,8 +1482,7 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
             return f"R$ {v/1_000:.1f}k"
         return f"R$ {v:,.0f}"
 
-    cards_html = ""
-    for ed in novos:
+    def _card_html(ed: dict) -> str:
         score_val = ed.get("score") or 0
         try:
             score_val = int(score_val)
@@ -1499,7 +1498,7 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
             f'<a href="{link}" style="color:#1E40AF;font-size:13px;text-decoration:none;">🔍 Ver no PNCP →</a>'
             if link else ""
         )
-        cards_html += (
+        return (
             f'<div style="border:1px solid #E5E7EB;border-left:4px solid #0E2A47;'
             f'margin:12px 20px;padding:14px 16px;border-radius:6px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
@@ -1512,36 +1511,52 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
             f'</div>'
         )
 
-    html = (
-        '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#F7F8FA;margin:0;padding:20px;">'
-        '<div style="max-width:620px;margin:0 auto;background:white;border-radius:8px;overflow:hidden;'
-        'box-shadow:0 2px 8px rgba(0,0,0,0.1);">'
-        '<div style="background:#0E2A47;color:white;padding:20px 24px;">'
-        '<h2 style="margin:0;font-size:18px;">🏗️ Concrelagos Intelligence Hub</h2>'
-        f'<p style="margin:6px 0 0;opacity:0.85;font-size:14px;">'
-        f'{n} novo(s) edital(is) qualificado(s) encontrado(s)</p>'
-        '</div>'
-        + cards_html +
-        f'<div style="background:#F3F4F6;padding:14px 24px;text-align:center;'
-        f'font-size:12px;color:#6B7280;border-top:1px solid #E5E7EB;">'
-        f'Acesse o <a href="{APP_URL}" style="color:#0E2A47;font-weight:600;">dashboard</a> '
-        f'para análise completa, filtros e pipeline de oportunidades.</div>'
-        '</div></body></html>'
-    )
+    def _html_uf(uf: str, eds: list[dict]) -> str:
+        """Boletim de UM estado, com botão que abre o Boletim já filtrado nesse UF."""
+        cards = "".join(_card_html(ed) for ed in eds)
+        link_estado = f"{APP_URL}?uf={uf}"
+        return (
+            '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#F7F8FA;margin:0;padding:20px;">'
+            '<div style="max-width:620px;margin:0 auto;background:white;border-radius:8px;overflow:hidden;'
+            'box-shadow:0 2px 8px rgba(0,0,0,0.1);">'
+            '<div style="background:#0E2A47;color:white;padding:20px 24px;">'
+            f'<h2 style="margin:0;font-size:18px;">🏗️ Concrelagos · Licitações {uf}</h2>'
+            f'<p style="margin:6px 0 0;opacity:0.85;font-size:14px;">'
+            f'{len(eds)} novo(s) edital(is) qualificado(s) em {uf}</p>'
+            '</div>'
+            # Botão de acesso direto ao boletim do estado (topo, bem visível)
+            f'<div style="text-align:center;padding:16px 24px 4px;">'
+            f'<a href="{link_estado}" style="display:inline-block;background:#C5A572;color:#0E2A47;'
+            f'font-weight:700;font-size:14px;text-decoration:none;padding:11px 22px;border-radius:6px;">'
+            f'📋 Abrir boletim de {uf} →</a></div>'
+            + cards +
+            f'<div style="background:#F3F4F6;padding:14px 24px;text-align:center;'
+            f'font-size:12px;color:#6B7280;border-top:1px solid #E5E7EB;">'
+            f'<a href="{link_estado}" style="color:#0E2A47;font-weight:600;">Ver boletim de {uf}</a> '
+            f'— análise com IA, filtros e exportação.</div>'
+            '</div></body></html>'
+        )
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🏗️ [{n}] novo(s) edital(is) qualificado(s) — Concrelagos Hub"
-    msg["From"] = remetente
-    msg["To"] = ", ".join(destinatarios)
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    # Agrupa os novos editais POR ESTADO → um e-mail (boletim) por UF.
+    por_uf: dict[str, list[dict]] = {}
+    for ed in novos:
+        uf = str(ed.get("uf") or "??").upper().strip() or "??"
+        por_uf.setdefault(uf, []).append(ed)
 
     try:
         with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as srv:
             srv.ehlo()
             srv.starttls()
             srv.login(remetente, senha)
-            srv.sendmail(remetente, destinatarios, msg.as_string())
-        logging.info("Notificação enviada para %s (%d edital(is)).", destinatarios, n)
+            for uf, eds in sorted(por_uf.items()):
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = f"🏗️ {uf} · {len(eds)} novo(s) edital(is) — Concrelagos Hub"
+                msg["From"] = remetente
+                msg["To"] = ", ".join(destinatarios)
+                msg.attach(MIMEText(_html_uf(uf, eds), "html", "utf-8"))
+                srv.sendmail(remetente, destinatarios, msg.as_string())
+        logging.info("Notificações por estado enviadas para %s: %s",
+                     destinatarios, {uf: len(e) for uf, e in sorted(por_uf.items())})
     except smtplib.SMTPAuthenticationError:
         logging.error("Notificação: falha de autenticação SMTP. Verifique NOTIFICACAO_EMAIL_SENHA (use App Password).")
     except Exception as exc:

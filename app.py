@@ -1103,11 +1103,19 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
+    # Deep-link por estado: URL "?uf=MG" abre o Boletim já filtrado nesse estado
+    # (usado pelos links dos e-mails por estado). Aceita 1 ou vários: ?uf=MG&uf=SP
+    try:
+        _uf_qp = [str(u).upper().strip() for u in st.query_params.get_all("uf") if str(u).strip()]
+    except Exception:
+        _uf_qp = []
+
     # ===== Filtros: UMA linha limpa + "Mais filtros" (modelo ConLicitação) =====
     fc1, fc2, fc3, fc4 = st.columns([1.1, 1, 2, 1.2])
     with fc1:
         ufs_disp = sorted(ed["uf"].dropna().unique().tolist()) if "uf" in ed.columns and not ed.empty else []
-        uf_sel = st.multiselect("Estados", ufs_disp, default=ufs_disp)
+        _default_ufs = [u for u in _uf_qp if u in ufs_disp] or ufs_disp
+        uf_sel = st.multiselect("Estados", ufs_disp, default=_default_ufs)
     with fc2:
         situacao = st.selectbox("Situação", ["Todas", "Abertas", "Encerradas"],
                                 help="Abertas = prazo de proposta ainda no futuro")
@@ -1211,8 +1219,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         st.dataframe(df, width='stretch', hide_index=True)
         return
 
-    # ----- Paginação -----
-    _POR_PAGINA = 20
+    # ----- Paginação ----- (páginas leves: 10 cards por vez)
+    _POR_PAGINA = 10
     _chave_filtro = f"{busca}|{ordem}|{situacao}|{portal_sel}|{so_favoritas}"
     if st.session_state.get("_editais_chave_filtro") != _chave_filtro:
         st.session_state["_editais_chave_filtro"] = _chave_filtro
