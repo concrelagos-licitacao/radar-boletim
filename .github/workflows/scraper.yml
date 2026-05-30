@@ -38,10 +38,13 @@ jobs:
       PNCP_MAX_PAGINAS: '50'
       PNCP_TIMEOUT_S: '60'
       PNCP_RETRY_COUNT: '2'
+      # Pausa entre requisições PNCP — sobe um pouco para reduzir throttling
+      # (corpo vazio) que às vezes zerava uma modalidade inteira na rodada.
+      PNCP_PAUSA_S: '1.1'
       HAVERSINE_AJUSTE_FATOR: '1.0'
       # Enriquecimento por itens: consulta endpoint de itens para editais genéricos (score=1)
       PNCP_BUSCAR_ITENS: 'true'
-      PNCP_ITENS_MAX: '100'
+      PNCP_ITENS_MAX: '150'
       # Captura SEM corte de valor (0 = pega tudo). O filtro de valor é feito na TELA
       # (app.py), para nunca jogar fora uma licitação na coleta.
       VALOR_MINIMO_GERAL:    '0'
