@@ -824,20 +824,28 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
     response = None
-    # Descoberta dinâmica (à prova de renomeações do Google): pergunta à conta
-    # quais modelos existem e prioriza os 'flash' que suportam generateContent.
+    # 🔒 TRAVA DE CUSTO ZERO: só usamos modelos da família "flash" (camada gratuita
+    # do Gemini). Modelos "pro"/"ultra"/"exp" (que podem cobrar) são EXCLUÍDOS.
+    # Sem billing ativado na conta, é impossível gerar fatura — no máximo dá erro de cota.
+    _PAGOS = ("pro", "ultra", "exp", "thinking")
+    def _eh_gratuito(nome: str) -> bool:
+        n = nome.lower()
+        return "flash" in n and "vision" not in n and not any(p in n for p in _PAGOS)
+
+    # Descoberta dinâmica (à prova de renomeações do Google): pergunta à conta quais
+    # modelos existem e mantém só os 'flash' gratuitos que suportam generateContent.
     _MODELOS_GEMINI = []
     try:
         for _m in client.models.list():
             _nome = (getattr(_m, "name", "") or "").split("/")[-1]
             _acts = getattr(_m, "supported_actions", None) or []
-            if _nome and "flash" in _nome and "vision" not in _nome and ("generateContent" in _acts or not _acts):
+            if _nome and _eh_gratuito(_nome) and ("generateContent" in _acts or not _acts):
                 _MODELOS_GEMINI.append(_nome)
     except Exception:
         pass
-    # Acrescenta candidatos conhecidos como reforço (sem duplicar)
+    # Reforço: candidatos conhecidos da camada gratuita (sem duplicar)
     for _c in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash-001"]:
-        if _c not in _MODELOS_GEMINI:
+        if _c not in _MODELOS_GEMINI and _eh_gratuito(_c):
             _MODELOS_GEMINI.append(_c)
     _ultimo_erro = ""
     for _modelo in _MODELOS_GEMINI:
