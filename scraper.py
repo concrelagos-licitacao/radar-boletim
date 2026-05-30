@@ -1272,19 +1272,30 @@ def _coletar_comprasnet(data_inicial: date, data_final: date) -> list[dict]:
         for mod in COMPRASGOV_MODALIDADES:
             pagina = 1
             while True:
-                try:
-                    resp = requests.get(COMPRASGOV_URL, params={
-                        "pagina": pagina, "tamanhoPagina": 100,
-                        "unidadeOrgaoUfSigla": uf, "codigoModalidade": mod,
-                        "dataPublicacaoPncpInicial": di, "dataPublicacaoPncpFinal": df,
-                    }, timeout=PNCP_TIMEOUT_S, headers={"Accept": "application/json"})
-                    if resp.status_code in (204, 404):
+                # Retry por página: o Compras.gov.br dá timeout transitório (45s).
+                # Antes, 1 timeout abortava TODA a paginação do UF/mod → perdia editais.
+                payload = None
+                for tentativa in range(1, 4):
+                    try:
+                        resp = requests.get(COMPRASGOV_URL, params={
+                            "pagina": pagina, "tamanhoPagina": 100,
+                            "unidadeOrgaoUfSigla": uf, "codigoModalidade": mod,
+                            "dataPublicacaoPncpInicial": di, "dataPublicacaoPncpFinal": df,
+                        }, timeout=PNCP_TIMEOUT_S, headers={"Accept": "application/json"})
+                        if resp.status_code in (204, 404):
+                            payload = {"resultado": []}
+                            break
+                        resp.raise_for_status()
+                        payload = resp.json()
                         break
-                    resp.raise_for_status()
-                    payload = resp.json()
-                except (requests.RequestException, ValueError) as exc:
-                    logging.warning("Compras.gov.br erro (uf=%s mod=%s p=%d): %s — pula.", uf, mod, pagina, exc)
-                    break
+                    except (requests.RequestException, ValueError) as exc:
+                        if tentativa >= 3:
+                            logging.warning("Compras.gov.br erro (uf=%s mod=%s p=%d) após %d tentativas: %s — desiste deste uf/mod.",
+                                            uf, mod, pagina, tentativa, exc)
+                        else:
+                            time.sleep(PNCP_PAUSA_S * tentativa * 2)
+                if payload is None:
+                    break  # esgotou as tentativas — aborta este uf/mod (paginação é sequencial)
                 itens = payload.get("resultado") or []
                 if not itens:
                     break
