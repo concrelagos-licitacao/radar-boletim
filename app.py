@@ -794,8 +794,8 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         )
         return None
 
-    # 4) Chama Gemini — tenta gemini-1.5-flash primeiro (quota separada),
-    #    depois gemini-2.0-flash como fallback.
+    # 4) Chama Gemini — tenta modelos ATUAIS em ordem; pula automaticamente os
+    #    indisponíveis (404/NOT_FOUND) e os sem cota (429), até um funcionar.
     prompt = f"""Analise este edital público brasileiro de fornecimento de concreto usinado ou brita.
 Responda APENAS com JSON válido (sem markdown, sem explicação fora do JSON):
 {{
@@ -812,28 +812,39 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
     response = None
-    _MODELOS_GEMINI = ["gemini-1.5-flash", "gemini-2.0-flash"]
+    # Modelos gratuitos atuais (gemini-1.5-flash foi descontinuado na v1beta).
+    _MODELOS_GEMINI = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.0-flash-001",
+    ]
+    _ultimo_erro = ""
     for _modelo in _MODELOS_GEMINI:
         try:
             response = client.models.generate_content(model=_modelo, contents=prompt)
             break
         except Exception as _exc:
             _exc_str = str(_exc)
-            if "429" in _exc_str or "RESOURCE_EXHAUSTED" in _exc_str:
-                continue  # tenta próximo modelo
-            # Erro diferente de quota — mostra e para
+            _ultimo_erro = _exc_str
+            # Modelo indisponível (404) ou sem cota (429) → tenta o próximo
+            if any(t in _exc_str for t in ("429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND", "not found", "not supported")):
+                continue
+            # Outro erro (chave inválida, rede) — mostra e para
             st.error(f"Erro ao chamar Gemini API ({_modelo}): {_exc}")
             return None
 
     if response is None:
-        st.warning(
-            "⚠️ **Cota gratuita do Gemini esgotada** para todos os modelos disponíveis. "
-            "Isso acontece quando muitas análises são feitas no mesmo dia. "
-            "**Soluções:** (1) Aguarde até amanhã (cota renova às 00h UTC); "
-            "(2) Gere uma nova chave API gratuita em outro projeto em "
-            "[aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) "
-            "e atualize o Streamlit Secrets → `[gemini] api_key`."
-        )
+        if "429" in _ultimo_erro or "RESOURCE_EXHAUSTED" in _ultimo_erro:
+            st.warning(
+                "⚠️ **Cota gratuita do Gemini esgotada** por hoje. A cota renova às 00h UTC. "
+                "Tente novamente mais tarde."
+            )
+        else:
+            st.error(
+                "Nenhum modelo Gemini disponível respondeu. Último erro: "
+                f"{_ultimo_erro[:300]}"
+            )
         return None
 
     try:
