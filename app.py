@@ -257,6 +257,17 @@ st.markdown(
     .cl-fonte-pncp       { background:#EFF6FF;color:#1D4ED8;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     .cl-fonte-comprasnet { background:#FFF7ED;color:#C2410C;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     .cl-fonte-bll        { background:#F5F3FF;color:#6D28D9;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
+    /* Boletim (modelo ConLicitação) */
+    .cl-boletim-dia {
+        background: linear-gradient(90deg,#0E2A47,#1E3A5F); color:#fff;
+        font-weight:700; font-size:0.95rem; padding:0.5rem 0.9rem;
+        border-radius:6px; margin:1.2rem 0 0.6rem 0;
+    }
+    .cl-fav-badge { color:#F59E0B; font-size:1rem; font-weight:700; }
+    .cl-origem-tag {
+        background:#ECFDF5; color:#047857; font-size:0.7rem; font-weight:700;
+        padding:0.1rem 0.4rem; border-radius:3px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -487,6 +498,56 @@ def _desmarcar_lido(num_controle: str) -> None:
         st.session_state["lidos_set"] = lidos
     except Exception as exc:
         st.toast(f"Erro ao remover do Sheets: {exc}", icon="⚠️")
+
+
+def _favs_set() -> set:
+    """Set de num_controle marcados como favoritos (estrela). Lê do Sheets 1x/sessão."""
+    if "favs_set" not in st.session_state:
+        try:
+            gc = _build_gspread_client()
+            sh = gc.open_by_key(_get_sheet_id())
+            ws = sh.worksheet("Favoritos")
+            vals = ws.col_values(1)
+            favs = {v.strip() for v in vals if v.strip() and v.strip() != "numero_controle_pncp"}
+        except Exception:
+            favs = set()
+        st.session_state["favs_set"] = favs
+    return st.session_state["favs_set"]
+
+
+def _marcar_fav(num_controle: str) -> None:
+    favs = _favs_set()
+    if num_controle in favs:
+        return
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Favoritos", rows=2000, cols=1)
+        header = ws.acell("A1").value
+        if not header or header.strip() != "numero_controle_pncp":
+            ws.update("A1", [["numero_controle_pncp"]])
+        ws.append_row([num_controle], value_input_option="USER_ENTERED")
+        favs.add(num_controle)
+        st.session_state["favs_set"] = favs
+    except Exception as exc:
+        st.toast(f"Erro ao favoritar: {exc}", icon="⚠️")
+
+
+def _desmarcar_fav(num_controle: str) -> None:
+    favs = _favs_set()
+    if num_controle not in favs:
+        return
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Favoritos", rows=2000, cols=1)
+        cell = ws.find(num_controle)
+        if cell:
+            ws.delete_rows(cell.row)
+        favs.discard(num_controle)
+        st.session_state["favs_set"] = favs
+    except Exception as exc:
+        st.toast(f"Erro ao desfavoritar: {exc}", icon="⚠️")
 
 
 @st.cache_data(ttl=300, show_spinner="Carregando dados da planilha...")
@@ -991,14 +1052,30 @@ def _fmt_data(v) -> str:
         return str(v)
 
 
+def _exportar_excel(df: pd.DataFrame) -> bytes:
+    """Gera um .xlsx com as colunas mais úteis das licitações."""
+    import io
+    cols = [c for c in [
+        "data_abertura", "orgao", "municipio", "uf", "objeto", "material",
+        "valor_estimado", "score_label", "modalidade", "numero_edital",
+        "distancia_km", "filial_mais_proxima", "origem_plataforma", "fonte",
+        "link_pncp", "link_sistema_origem",
+    ] if c in df.columns]
+    out = df[cols].copy() if cols else df.copy()
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        out.to_excel(w, index=False, sheet_name="Licitações")
+    return buf.getvalue()
+
+
 def _aba_editais(ed: pd.DataFrame) -> None:
-    st.subheader("Editais Qualificados")
+    st.subheader("📋 Boletim de Licitações")
 
     if ed.empty:
-        st.info("Nenhum edital qualificado ainda. Rode `python scraper.py` para popular.")
+        st.info("Nenhuma licitação ainda. Rode `python scraper.py` para popular.")
         return
 
-    # ----- Filtros adicionais -----
+    # ----- Filtros (modelo ConLicitação) -----
     col_a, col_b, col_c = st.columns([2, 1, 1])
     with col_a:
         busca = st.text_input("🔎 Buscar por órgão, município ou objeto", placeholder="ex: prefeitura, concreto…")
@@ -1007,7 +1084,26 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     with col_c:
         modo = st.radio("Modo", ["Cards", "Tabela"], horizontal=True, label_visibility="collapsed")
 
+    col_d, col_e, col_f = st.columns([1, 1, 1])
+    with col_d:
+        situacao = st.selectbox("Situação", ["Todas", "Abertas", "Encerradas"],
+                                help="Abertas = prazo de proposta ainda no futuro")
+    with col_e:
+        # Portais/plataformas presentes nos dados
+        portais = sorted({
+            str(p).strip() for p in (
+                list(ed.get("origem_plataforma", pd.Series([], dtype=str)).dropna())
+                + list(ed.get("fonte", pd.Series([], dtype=str)).dropna())
+            ) if str(p).strip()
+        })
+        portal_sel = st.multiselect("Portal / origem", portais, default=portais,
+                                    help="Plataforma onde o edital foi publicado")
+    with col_f:
+        so_favoritas = st.checkbox("⭐ Só favoritas", value=False)
+
     df = ed.copy()
+
+    # Busca textual
     if busca:
         b = busca.lower()
         mask = (
@@ -1017,6 +1113,26 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         )
         df = df[mask]
 
+    # Situação (aberta/encerrada) por data de encerramento (fallback: abertura)
+    if situacao != "Todas":
+        base = df["data_encerramento"] if "data_encerramento" in df.columns and df["data_encerramento"].notna().any() else df.get("data_abertura")
+        if base is not None:
+            b = pd.to_datetime(base, errors="coerce", utc=True)
+            agora = pd.Timestamp.now(tz="UTC")
+            df = df[(b >= agora)] if situacao == "Abertas" else df[(b < agora)]
+
+    # Portal / origem
+    if portal_sel and ("origem_plataforma" in df.columns or "fonte" in df.columns):
+        op = df.get("origem_plataforma", pd.Series([""] * len(df))).astype(str)
+        fo = df.get("fonte", pd.Series([""] * len(df))).astype(str)
+        df = df[op.isin(portal_sel) | fo.isin(portal_sel)]
+
+    # Só favoritas
+    if so_favoritas and "numero_controle_pncp" in df.columns:
+        favs = _favs_set()
+        df = df[df["numero_controle_pncp"].isin(favs)] if favs else df.iloc[0:0]
+
+    # Ordenação
     if ordem == "Maior valor" and "valor_estimado" in df.columns:
         df = df.sort_values("valor_estimado", ascending=False)
     elif ordem == "Menor distância" and "distancia_km" in df.columns:
@@ -1024,21 +1140,38 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     elif ordem == "Data abertura" and "data_abertura" in df.columns:
         df = df.sort_values("data_abertura", ascending=True)
     else:  # Mais recente
-        if "data_execucao" in df.columns:
+        if "data_abertura" in df.columns:
+            df = df.sort_values("data_abertura", ascending=False)
+        elif "data_execucao" in df.columns:
             df = df.sort_values("data_execucao", ascending=False)
 
-    if modo == "Tabela":
-        st.caption(f"**{len(df)}** editais encontrados")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+    # ----- Exportar (Excel + CSV) -----
+    exp1, exp2, _ = st.columns([1, 1, 3])
+    with exp1:
+        try:
+            st.download_button(
+                "📊 Gerar Excel", data=_exportar_excel(df),
+                file_name=f"licitacoes_{datetime.now():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        except Exception:
+            pass
+    with exp2:
         st.download_button(
-            "📥 Baixar CSV", data=df.to_csv(index=False).encode("utf-8"),
-            file_name=f"editais_{datetime.now():%Y%m%d}.csv", mime="text/csv",
+            "📥 CSV", data=df.to_csv(index=False).encode("utf-8"),
+            file_name=f"licitacoes_{datetime.now():%Y%m%d}.csv", mime="text/csv",
+            use_container_width=True,
         )
+
+    if modo == "Tabela":
+        st.caption(f"**{len(df)}** licitação(ões) encontrada(s)")
+        st.dataframe(df, use_container_width=True, hide_index=True)
         return
 
     # ----- Paginação -----
     _POR_PAGINA = 20
-    _chave_filtro = f"{busca}|{ordem}"
+    _chave_filtro = f"{busca}|{ordem}|{situacao}|{portal_sel}|{so_favoritas}"
     if st.session_state.get("_editais_chave_filtro") != _chave_filtro:
         st.session_state["_editais_chave_filtro"] = _chave_filtro
         st.session_state["page_editais"] = 0
@@ -1051,18 +1184,39 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     df_page = df.iloc[start:end]
 
     if total == 0:
-        st.caption("Nenhum edital encontrado.")
+        st.caption("Nenhuma licitação encontrada com esses filtros.")
     elif n_paginas == 1:
-        st.caption(f"**{total}** edital(is) encontrado(s)")
+        st.caption(f"**{total}** licitação(ões) encontrada(s)")
     else:
         st.caption(
-            f"**{total}** edital(is) encontrado(s) — "
+            f"**{total}** licitação(ões) — "
             f"mostrando {start + 1}–{end} · página {pagina + 1} de {n_paginas}"
         )
+
+    # Agrupamento por dia (seções tipo "boletim") só quando ordenado por data
+    _agrupar_por_dia = ordem in ("Mais recente", "Data abertura")
+    _dia_atual = None
 
     # ----- Cards estilo ConLicitação -----
     for idx, row in enumerate(df_page.itertuples(index=False), start=start + 1):
         d = row._asdict()
+
+        # Cabeçalho de "boletim" (seção por dia)
+        if _agrupar_por_dia:
+            _dt = d.get("data_abertura")
+            _dia = None
+            try:
+                if _dt is not None and not pd.isna(_dt):
+                    _dia = pd.to_datetime(_dt).date()
+            except Exception:
+                _dia = None
+            if _dia != _dia_atual:
+                _dia_atual = _dia
+                _label_dia = _dia.strftime("%d/%m/%Y") if _dia else "Sem data"
+                st.markdown(
+                    f'<div class="cl-boletim-dia">📅 {_label_dia}</div>',
+                    unsafe_allow_html=True,
+                )
         urgente = _eh_urgente(d.get("data_abertura"))
         objeto = (d.get("objeto") or "").strip() or "(sem descrição)"
         orgao = d.get("orgao") or "—"
@@ -1081,11 +1235,19 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         itens_enc = str(d.get("itens_encontrados") or "").strip()
         keyword_trig = str(d.get("keyword_trigger") or "").strip()
 
-        # Estado "lido"
+        # Estado "lido" e "favorito"
         num_controle = str(d.get("numero_controle_pncp") or "")
         ja_lido = num_controle in _lidos_set()
+        ja_fav = num_controle in _favs_set()
         card_extra_class = "cl-edital-card-lido" if ja_lido else ""
         lido_badge_html = '<span class="cl-lido-badge">✓ LIDO</span>' if ja_lido else ""
+        fav_badge_html = '<span class="cl-fav-badge">★</span>' if ja_fav else ""
+
+        # Rótulo da plataforma de origem (ex.: "[LICITANET]", igual ConLicitação)
+        origem_plat = str(d.get("origem_plataforma") or "").strip()
+        origem_tag_html = (
+            f'<span class="cl-origem-tag">[{origem_plat}]</span> ' if origem_plat else ""
+        )
 
         # Score de confiança
         try:
@@ -1140,11 +1302,11 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'{tag_score_html}'
             f'</div>'
             f'<div style="display:flex;align-items:center;gap:0.5rem;">'
-            f'{tag_urgente_html}{lido_badge_html}'
+            f'{fav_badge_html}{tag_urgente_html}{lido_badge_html}'
             f'</div>'
             f'</div>'
             f'<div class="cl-edital-body">'
-            f'<div class="cl-edital-objeto"><b>Objeto:</b> {objeto[:400]}</div>'
+            f'<div class="cl-edital-objeto"><b>Objeto:</b> {origem_tag_html}{objeto[:400]}</div>'
             f'{kw_html}'
             f'{item_enc_html}'
             f'<div class="cl-edital-meta">'
@@ -1168,17 +1330,25 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         st.markdown(html, unsafe_allow_html=True)
 
         # ----- Botões Streamlit (interativos) -----
-        _lbl_lido = "✅ Lido" if ja_lido else "👁️ Marcar como lido"
-        _hlp_lido = "Clique para desmarcar como lido" if ja_lido else "Marca este edital como revisado"
-        if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", help=_hlp_lido):
-            if ja_lido:
-                _desmarcar_lido(num_controle)
-            else:
-                _marcar_lido(num_controle)
-            st.rerun()
-
-        if st.button("🤖 Analisar com IA", key=f"ia_{idx}_{num_edital}",
-                     help="Gemini lê o PDF e extrai: produto, quantidade, prazo e recomendação"):
+        bcol1, bcol2, bcol3 = st.columns(3)
+        with bcol1:
+            _lbl_lido = "✅ Lido" if ja_lido else "👁️ Marcar lido"
+            if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", use_container_width=True,
+                         help="Clique para desmarcar" if ja_lido else "Marca como revisado"):
+                _desmarcar_lido(num_controle) if ja_lido else _marcar_lido(num_controle)
+                st.rerun()
+        with bcol2:
+            _lbl_fav = "★ Favorita" if ja_fav else "☆ Favoritar"
+            if st.button(_lbl_fav, key=f"fav_{idx}_{num_controle}", use_container_width=True,
+                         help="Clique para desfavoritar" if ja_fav else "Marca como favorita"):
+                _desmarcar_fav(num_controle) if ja_fav else _marcar_fav(num_controle)
+                st.rerun()
+        _ia_click = False
+        with bcol3:
+            _ia_click = st.button("🤖 Analisar com IA", key=f"ia_{idx}_{num_edital}",
+                                  use_container_width=True,
+                                  help="Gemini lê o PDF e extrai produto, quantidade, prazo e recomendação")
+        if _ia_click:
             with st.spinner("Baixando edital e consultando Gemini..."):
                 resumo = _resumir_edital(
                     str(d.get("numero_controle_pncp") or ""),
@@ -1379,18 +1549,14 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Visão Geral", "🗺️ Mapa", "📋 Editais", "🏭 Filiais", "📅 Diário",
-    ])
+    # Modelo ConLicitação: Boletim é a tela principal; Mapa é o que preservamos
+    # do site antigo; Diário mostra a saúde do scraper (uso interno).
+    tab1, tab2, tab3 = st.tabs(["📋 Boletim", "🗺️ Mapa", "📅 Diário"])
     with tab1:
-        _aba_visao_geral(ed_f, fil)
+        _aba_editais(ed_f)
     with tab2:
         _aba_mapa(ed_f, fil)
     with tab3:
-        _aba_editais(ed_f)
-    with tab4:
-        _aba_filiais(fil)
-    with tab5:
         _aba_diario(ed_f, ultima)
 
 

@@ -14,3 +14,6 @@ pydeck>=0.9
 # IA — Resumo de editais via Google Gemini API (gratuito) (Fase 7)
 google-genai>=1.0          # novo SDK Google (substitui google-generativeai)
 pdfplumber>=0.10
+
+# Exportação para Excel (.xlsx) no dashboard (modelo ConLicitação)
+openpyxl>=3.1
