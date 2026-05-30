@@ -1185,12 +1185,12 @@ def _fallback_csv(qualificados: list[dict]) -> None:
 # FONTES ADICIONAIS — ComprasNet e BLL (Fase 10: multi-fonte)
 # =========================================================================
 
-# ComprasNet — API pública sem autenticação (Dados Abertos do Governo Federal).
-# Cobre licitações federais e estaduais que ainda não migraram para o PNCP.
-COMPRASNET_BASE_URL = "https://compras.dados.gov.br/licitacoes/v1/licitacoes"
-# Modalidades relevantes: 1=Concorrência, 5=Pregão Presencial, 6=Pregão Eletrônico
-# (o ComprasNet usa seu próprio esquema de códigos, diferente do PNCP)
-COMPRASNET_MODALIDADES = [1, 5, 6]
+# Compras.gov.br Dados Abertos — API OFICIAL gratuita, sem login. Endpoint de
+# contratações 14.133 (espelho do PNCP), FILTRÁVEL POR UF → redundância confiável
+# que recupera o que a varredura direta do PNCP perde por throttling/limite de página.
+COMPRASGOV_URL = "https://dadosabertos.compras.gov.br/modulo-contratacoes/1_consultarContratacoes_PNCP_14133"
+COMPRASGOV_UFS = ("MG", "SP", "RJ", "ES", "PR", "BA")   # estados com filiais
+COMPRASGOV_MODALIDADES = (6, 5, 8)  # Pregão Eletrônico, Pregão Presencial, Dispensa
 
 # BLL — endpoint JSON interno do portal (não documentado oficialmente).
 # Cobre ~5.000 municípios em SP/MG/PR/RJ que usam a plataforma BLL.
@@ -1200,129 +1200,88 @@ BLL_KEYWORDS = ["concreto", "brita", "material de construcao"]
 
 
 def _normalizar_comprasnet(item: dict) -> dict:
-    """Converte um registro da API ComprasNet para o schema interno do scraper."""
-    # Campos observados na API dadosabertos.compras.gov.br:
-    # unidade: { codigoUnidade, nomeUnidade, municipio, uf, municipioIbge }
-    # licitacao: { numeroLicitacao, modalidadeCompra, descricaoObjeto,
-    #              dataPublicacaoEdital, dataAberturaProposta, valorEstimado,
-    #              linkEdital, linkSistemaOrigem, ... }
-    unidade = item.get("unidade") or {}
-    municipio_raw = unidade.get("municipio") or item.get("municipio") or ""
-    uf_raw = (unidade.get("uf") or item.get("uf") or "").upper()
+    """Normaliza um registro da API Compras.gov.br (contratações 14.133) ao schema interno.
 
-    valor_raw = item.get("valorEstimado") or item.get("valorTotalEstimado") or 0
+    Schema real (dadosabertos.compras.gov.br/modulo-contratacoes/...14133):
+    objetoCompra, unidadeOrgaoUfSigla, unidadeOrgaoMunicipioNome, orgaoEntidadeRazaoSocial,
+    orgaoEntidadeEsferaId, modalidadeNome, valorTotalEstimado, numeroControlePNCP,
+    orgaoEntidadeCnpj, anoCompraPncp, sequencialCompraPncp, dataAbertura/EncerramentoPropostaPncp.
+    """
+    cnpj = str(item.get("orgaoEntidadeCnpj") or "")
+    ano = str(item.get("anoCompraPncp") or "")
+    seq = str(item.get("sequencialCompraPncp") or "")
     try:
-        valor = float(valor_raw)
+        valor = float(item.get("valorTotalEstimado") or 0)
     except (TypeError, ValueError):
         valor = 0.0
-
-    data_abertura = (
-        item.get("dataAberturaProposta") or
-        item.get("dataAberturaPropostas") or
-        item.get("dataPublicacaoEdital") or ""
-    )
-    # Identificador único: usa numero_licitacao + uasg se não houver controle PNCP
-    uasg = str(item.get("codigoUasg") or item.get("uasg") or "")
-    numero = str(item.get("numeroLicitacao") or item.get("numero") or "")
-    modalidade_cod = str(item.get("codigoModalidadeCompra") or item.get("modalidade") or "")
-    id_interno = f"CN-{uasg}-{numero}" if uasg and numero else ""
-
-    link_orig = item.get("linkEdital") or item.get("linkSistemaOrigem") or ""
-    objeto = item.get("descricaoObjeto") or item.get("objeto") or ""
-    orgao_nome = (
-        item.get("nomeOrgao") or item.get("orgao") or
-        unidade.get("nomeUnidade") or ""
-    )
-
+    esfera_id = (item.get("orgaoEntidadeEsferaId") or "").upper()
+    link_pncp = f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}" if (cnpj and ano and seq) else ""
     return {
-        "numero_controle_pncp": item.get("numeroControlePNCP") or id_interno,
-        "numero_edital": numero,
-        "modalidade": item.get("descricaoModalidade") or f"Modalidade {modalidade_cod}",
-        "orgao": orgao_nome,
-        "esfera": item.get("esfera") or "F",  # ComprasNet é majoritariamente federal
-        "municipio": municipio_raw,
-        "uf": uf_raw,
-        "objeto": objeto,
+        "numero_controle_pncp": item.get("numeroControlePNCP") or "",
+        "numero_edital": str(item.get("numeroCompra") or ""),
+        "modalidade": item.get("modalidadeNome") or "",
+        "orgao": item.get("orgaoEntidadeRazaoSocial") or "",
+        "esfera": ESFERA_NOME.get(esfera_id, esfera_id),
+        "municipio": item.get("unidadeOrgaoMunicipioNome") or "",
+        "uf": (item.get("unidadeOrgaoUfSigla") or "").upper(),
+        "objeto": item.get("objetoCompra") or "",
         "valor_estimado": valor,
-        "data_abertura": data_abertura,
-        "data_encerramento": item.get("dataEncerramentoProposta") or "",
-        "link_pncp": item.get("linkPncp") or "",
-        "link_sistema_origem": link_orig,
-        "fonte": "COMPRASNET",
-        "origem_plataforma": "ComprasNet",
-        "_cnpj": "",
-        "_ano_compra": "",
-        "_seq_compra": "",
+        "data_abertura": item.get("dataAberturaPropostaPncp") or "",
+        "data_encerramento": item.get("dataEncerramentoPropostaPncp") or "",
+        "link_pncp": link_pncp,
+        "link_sistema_origem": "",
+        "fonte": "COMPRASGOV",
+        "origem_plataforma": "Compras.gov.br",
+        "_cnpj": cnpj,
+        "_ano_compra": ano,
+        "_seq_compra": seq,
     }
 
 
 def _coletar_comprasnet(data_inicial: date, data_final: date) -> list[dict]:
-    """Coleta editais do ComprasNet (federais/estaduais pré-migração PNCP).
+    """Coleta contratações 14.133 do Compras.gov.br Dados Abertos (oficial, grátis),
+    filtrando pelos estados das filiais (COMPRASGOV_UFS).
 
-    Falha silenciosa: se a API estiver indisponível ou retornar estrutura inesperada,
-    loga WARNING e retorna lista vazia — o scraper continua normalmente com PNCP.
+    É um espelho do PNCP, porém UF-filtrável e estável → **recupera o que a varredura
+    direta do PNCP perde por limite de página/throttling**. A dedup por número de
+    controle (em main) junta com o PNCP sem duplicar. Falha silenciosa por UF/modalidade.
     """
     coletados: list[dict] = []
     di = data_inicial.strftime("%Y-%m-%d")
     df = data_final.strftime("%Y-%m-%d")
-
-    for mod in COMPRASNET_MODALIDADES:
-        pagina = 1
-        while True:
-            try:
-                resp = requests.get(
-                    COMPRASNET_BASE_URL,
-                    params={
-                        "dataPublicacaoEdital_inicial": di,
-                        "dataPublicacaoEdital_final": df,
-                        "codigoModalidadeCompra": mod,
-                        "pagina": pagina,
-                    },
-                    timeout=30,
-                    headers={"Accept": "application/json"},
-                )
-                if resp.status_code == 404:
-                    break  # modalidade sem dados na janela
-                resp.raise_for_status()
-                payload = resp.json()
-            except requests.RequestException as exc:
-                logging.warning("ComprasNet API erro (mod=%s p=%d): %s — pulando ComprasNet.", mod, pagina, exc)
-                return coletados  # falha silenciosa, preserva o que já coletou
-            except ValueError as exc:
-                logging.warning("ComprasNet JSON inválido (mod=%s p=%d): %s", mod, pagina, exc)
-                break
-
-            # A API pode retornar os dados em diferentes envelopes
-            itens = (
-                payload.get("_embedded", {}).get("licitacoes") or
-                payload.get("result") or
-                payload.get("data") or
-                (payload if isinstance(payload, list) else [])
-            )
-            if not itens:
-                break
-
-            for item in itens:
+    for uf in COMPRASGOV_UFS:
+        for mod in COMPRASGOV_MODALIDADES:
+            pagina = 1
+            while True:
                 try:
-                    coletados.append(_normalizar_comprasnet(item))
-                except Exception as exc:
-                    logging.debug("ComprasNet: edital ignorado por estrutura incompleta: %s", exc)
-
-            # Paginação: verifica se há próxima página
-            total_pags = (
-                payload.get("page", {}).get("totalPages") or
-                payload.get("totalPaginas") or
-                1
-            )
-            if pagina >= int(total_pags) or pagina >= PNCP_MAX_PAGINAS:
-                break
-            pagina += 1
-            time.sleep(0.3)
-
+                    resp = requests.get(COMPRASGOV_URL, params={
+                        "pagina": pagina, "tamanhoPagina": 100,
+                        "unidadeOrgaoUfSigla": uf, "codigoModalidade": mod,
+                        "dataPublicacaoPncpInicial": di, "dataPublicacaoPncpFinal": df,
+                    }, timeout=PNCP_TIMEOUT_S, headers={"Accept": "application/json"})
+                    if resp.status_code in (204, 404):
+                        break
+                    resp.raise_for_status()
+                    payload = resp.json()
+                except (requests.RequestException, ValueError) as exc:
+                    logging.warning("Compras.gov.br erro (uf=%s mod=%s p=%d): %s — pula.", uf, mod, pagina, exc)
+                    break
+                itens = payload.get("resultado") or []
+                if not itens:
+                    break
+                for it in itens:
+                    try:
+                        coletados.append(_normalizar_comprasnet(it))
+                    except Exception:
+                        continue
+                total_pags = int(payload.get("totalPaginas") or 1)
+                if pagina >= total_pags or pagina >= PNCP_MAX_PAGINAS:
+                    break
+                pagina += 1
+                time.sleep(PNCP_PAUSA_S)
     if coletados:
-        logging.info("ComprasNet retornou %d editais brutos na janela %s a %s.", len(coletados), di, df)
-    else:
-        logging.info("ComprasNet: 0 editais brutos (API pode ter estrutura diferente — verificar logs).")
+        logging.info("Compras.gov.br (14.133): %d editais brutos (%s a %s, %d UFs).",
+                     len(coletados), di, df, len(COMPRASGOV_UFS))
     return coletados
 
 
