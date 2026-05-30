@@ -1,12 +1,13 @@
 name: Scraper PNCP (Concrelagos)
 
 # Cron schedule UTC. Horário Brasília = UTC-3.
-# 09:00 UTC = 06:00 Brasília
-# 15:00 UTC = 12:00 Brasília
-# 21:00 UTC = 18:00 Brasília
+# A cada 2h no horário comercial BR (06h–18h Brasília = 09h–21h UTC), 7 execuções/dia.
+# Editais saem ao longo do dia útil; rodar mais vezes acha a licitação mais cedo.
+# JANELA_DIAS=3 garante sobreposição (nada escapa entre rodadas; dedup evita repetir).
+# Custo: ~7×5min = 35 min/dia ≈ 1.050 min/mês (+ keep-alive ~450) < cota grátis 2.000.
 on:
   schedule:
-    - cron: '0 9,15,21 * * *'
+    - cron: '0 9,11,13,15,17,19,21 * * *'
   workflow_dispatch:    # permite rodar manualmente pelo botão "Run workflow"
     inputs:
       data_inicial:
