@@ -181,9 +181,13 @@ PNCP_MAX_PAGINAS = int(os.getenv("PNCP_MAX_PAGINAS", "5"))    # 5 páginas/modal
 # Códigos de modalidade conforme tabela de domínio do PNCP — varremos pregão,
 # concorrência, dispensa, inexigibilidade e leilão, que cobrem o universo
 # relevante para insumos de construção.
-# 6=Pregão Eletrônico, 5=Pregão Presencial, 4=Concorrência Presencial,
-# 3=Concorrência Eletrônica, 8=Dispensa, 9=Inexigibilidade, 12=Credenciamento, 1=Leilão.
-PNCP_MODALIDADES = (6, 5, 4, 3, 8, 9, 12, 1)
+# A Concrelagos só participa de 3 modalidades:
+#   6 = Pregão Eletrônico (PE)
+#   5 = Pregão Presencial
+#   8 = Dispensa de Licitação (DL)
+# As demais (Concorrência, Inexigibilidade, Credenciamento, Leilão) são ignoradas —
+# foco total no que a empresa realmente disputa (e runs mais rápidos/baratos).
+PNCP_MODALIDADES = (6, 5, 8)
 
 ABA_FILIAIS = "Filiais"
 ABA_OUTPUT = "Novas Licitações"
