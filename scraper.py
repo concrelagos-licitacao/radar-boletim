@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import sys
 import time
 import unicodedata
@@ -269,6 +270,7 @@ OUTPUT_HEADER = [
     # -- origem do edital (adicionado na Fase 10: multi-fonte) --
     "fonte",                  # API consultada: "PNCP", "COMPRASNET", "BLL"…
     "origem_plataforma",      # plataforma operacional do edital (ex: "LICITANET", "BLL", "ComprasNet")
+    "local_obra",             # local da obra detectado no texto (quando difere da sede do órgão) ou "a confirmar"
 ]
 
 # Mapeamento de modalidade PNCP → sigla e nome
@@ -687,8 +689,10 @@ def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
 
         matched = False
 
-        # Regra 2 — CONCRETO USINADO (só nos estados de concreto)
-        if uf in ESTADOS_CONCRETO:
+        # Regra 2 — CONCRETO USINADO (qualquer UF do órgão; a GEOGRAFIA decide depois
+        # pelo LOCAL DA OBRA — assim órgãos estaduais/federais com sede longe não
+        # são barrados aqui).
+        if True:
             hit, score = None, 0
             if hit_concreto_forte:
                 hit, score = hit_concreto_forte, 3
@@ -860,15 +864,32 @@ def qualificar_por_distancia(
     pedreiras = filiais.get("pedreiras") or []
 
     coords_offline = _carregar_coords_offline()
+    atend, regex_obra, nome2key = _municipios_atendidos(filiais)
+
+    def _match(coord, material, valor):
+        """(tipo, filial, dist_km) se 'coord' está no raio para o material; senão None."""
+        if coord is None:
+            return None
+        if material == "concreto" and usinas:
+            d, f = _menor_distancia(coord, usinas)
+            if d is not None and d <= RAIO_USINA_KM:
+                return ("atendimento_usina", f, round(d, 2))
+        if material == "brita" and pedreiras and (valor or 0) >= VALOR_MINIMO_PEDREIRA:
+            d, f = _menor_distancia(coord, pedreiras)
+            if d is not None and d <= RAIO_PEDREIRA_KM:
+                return ("atendimento_pedreira", f, round(d, 2))
+        return None
+
     falhas_geo = 0
+    por_obra = 0
+    a_confirmar = 0
     for ed in editais:
         mun_norm = _normalize(ed["municipio"])
         uf = ed["uf"]
         chave_geo = f"{mun_norm}|{uf}"
 
-        # 1º) base OFFLINE de municípios (instantânea, sem falha de rede)
+        # Coordenada do município do ÓRGÃO: offline → Nominatim (fallback)
         origem = coords_offline.get((mun_norm, uf))
-        # 2º) fallback Nominatim (só quando o município não está na base)
         if origem is None:
             if chave_geo in geocode_cache:
                 origem = geocode_cache[chave_geo]
@@ -876,44 +897,56 @@ def qualificar_por_distancia(
                 origem = _geocodificar_municipio(geocoder, ed["municipio"], ed["uf"])
                 geocode_cache[chave_geo] = origem
 
-        if origem is None:
-            falhas_geo += 1
-            logging.warning("Sem coordenada para %s/%s (offline+Nominatim) — edital descartado.",
-                            ed["municipio"], ed["uf"])
+        material = ed.get("material")
+        valor = ed.get("valor_estimado") or 0
+        local_obra = ""
+
+        # A) qualifica pelo município do ÓRGÃO
+        res = _match(origem, material, valor)
+
+        # B) qualifica pelo LOCAL DA OBRA citado no objeto (capta estaduais/federais
+        #    cuja SEDE é longe mas a obra é perto de uma usina/pedreira)
+        if res is None and regex_obra is not None:
+            mm = regex_obra.search(_normalize(ed["objeto"]))
+            if mm:
+                key = nome2key.get(mm.group(1))
+                r2 = _match(coords_offline.get(key) if key else None, material, valor)
+                if r2:
+                    res = r2
+                    local_obra = f"{key[0].title()}/{key[1]}"
+                    por_obra += 1
+
+        if res:
+            tipo, f, dist = res
+            ed["tipo_atendimento"] = tipo
+            ed["filial_mais_proxima"] = f"{f['nome']} ({f['municipio']}/{f['uf']})"
+            ed["distancia_km"] = dist
+            ed["local_obra"] = local_obra
+            if origem:
+                ed["latitude"], ed["longitude"] = origem[0], origem[1]
+            qualificados.append(ed)
             continue
 
-        # 1) Tenta usinas
-        if usinas:
-            distancia_km, mais_proxima = _menor_distancia(origem, usinas)
-            if distancia_km is not None and distancia_km <= RAIO_USINA_KM:
-                ed["tipo_atendimento"] = "atendimento_usina"
-                ed["filial_mais_proxima"] = f"{mais_proxima['nome']} ({mais_proxima['municipio']}/{mais_proxima['uf']})"
-                ed["distancia_km"] = round(distancia_km, 2)
-                ed["latitude"] = origem[0]
-                ed["longitude"] = origem[1]
-                qualificados.append(ed)
-                continue
+        # C) Estadual/Federal com sinal forte (score 3) e sem local detectável →
+        #    mantém como POSSÍVEL "a confirmar" (não descarta pela SEDE do órgão).
+        esf = str(ed.get("esfera", "")).strip().lower()
+        if esf[:1] in ("e", "f") and int(ed.get("score") or 0) >= 3:
+            ed["tipo_atendimento"] = "local_a_confirmar"
+            ed["local_obra"] = "a confirmar"
+            ed["filial_mais_proxima"] = ""
+            ed["distancia_km"] = ""
+            a_confirmar += 1
+            qualificados.append(ed)
+            continue
 
-        # 2) Tenta pedreiras (somente para brita acima do limiar)
-        if (
-            pedreiras
-            and ed.get("material") == "brita"
-            and ed["valor_estimado"] >= VALOR_MINIMO_PEDREIRA
-        ):
-            distancia_km, mais_proxima = _menor_distancia(origem, pedreiras)
-            if distancia_km is not None and distancia_km <= RAIO_PEDREIRA_KM:
-                ed["tipo_atendimento"] = "atendimento_pedreira"
-                ed["filial_mais_proxima"] = f"{mais_proxima['nome']} ({mais_proxima['municipio']}/{mais_proxima['uf']})"
-                ed["distancia_km"] = round(distancia_km, 2)
-                ed["latitude"] = origem[0]
-                ed["longitude"] = origem[1]
-                qualificados.append(ed)
-                continue
+        # Fora do alcance — descartado.
+        if origem is None:
+            falhas_geo += 1
 
-        # Fora dos raios — descartado da memória.
-
-    logging.info("%d editais qualificados após filtro geográfico (%d sem coordenada).",
-                 len(qualificados), falhas_geo)
+    logging.info(
+        "%d qualificados (geo): %d por local-da-obra, %d 'a confirmar' (estad/fed), %d sem coordenada.",
+        len(qualificados), por_obra, a_confirmar, falhas_geo,
+    )
     return qualificados
 
 
@@ -947,6 +980,61 @@ def _carregar_coords_offline() -> dict[tuple[str, str], tuple[float, float]]:
         logging.warning("dados/municipios_coords.csv não encontrado — usando só Nominatim.")
     _COORDS_OFFLINE = coords
     return coords
+
+
+# Cache (1×/execução) dos municípios dentro do raio das filiais + índice de nomes.
+_MUN_ATENDIDOS: dict[tuple[str, str], dict] | None = None
+_MUN_REGEX: "re.Pattern | None" = None
+_MUN_NOME2KEY: dict[str, tuple[str, str]] = {}
+# Nomes de municípios curtos/ambíguos que viram palavra comum no texto do edital.
+_MUN_BLOCKLIST = {
+    "serra", "campos", "bonito", "alegre", "capela", "cristina", "patos",
+    "boa vista", "santa rita", "bom jesus", "pirapora", "cataguases",
+    "central", "vargem", "monte", "matias", "lagoa", "areia",
+}
+
+
+def _municipios_atendidos(filiais: dict[str, list[dict]]):
+    """Pré-calcula os municípios dentro do raio das usinas/pedreiras e um regex
+    para detectar o LOCAL DA OBRA citado no objeto do edital.
+
+    Retorna (mapa, regex, nome2key):
+      mapa[(municipio_norm, uf)] = {"filial", "dist_km", "tipo"}
+      regex casa nomes de municípios atendidos no texto (limite de palavra)
+      nome2key[municipio_norm] = (municipio_norm, uf)  # 1º atendido com aquele nome
+    """
+    global _MUN_ATENDIDOS, _MUN_REGEX, _MUN_NOME2KEY
+    if _MUN_ATENDIDOS is not None:
+        return _MUN_ATENDIDOS, _MUN_REGEX, _MUN_NOME2KEY
+
+    coords = _carregar_coords_offline()
+    usinas = filiais.get("usinas") or []
+    pedreiras = filiais.get("pedreiras") or []
+    atend: dict[tuple[str, str], dict] = {}
+    for (mun, uf), origem in coords.items():
+        if usinas:
+            du, fu = _menor_distancia(origem, usinas)
+            if du is not None and du <= RAIO_USINA_KM:
+                atend[(mun, uf)] = {"filial": fu, "dist_km": round(du, 2), "tipo": "usina"}
+                continue
+        if uf == "RJ" and pedreiras:
+            dp, fp = _menor_distancia(origem, pedreiras)
+            if dp is not None and dp <= RAIO_PEDREIRA_KM:
+                atend[(mun, uf)] = {"filial": fp, "dist_km": round(dp, 2), "tipo": "pedreira"}
+
+    nome2key: dict[str, tuple[str, str]] = {}
+    nomes: list[str] = []
+    for (mun, uf) in atend:
+        nome2key.setdefault(mun, (mun, uf))
+        if len(mun) >= 6 and mun not in _MUN_BLOCKLIST:
+            nomes.append(mun)
+    nomes.sort(key=len, reverse=True)  # casa o nome mais específico primeiro
+    regex = re.compile(r"\b(" + "|".join(re.escape(n) for n in nomes) + r")\b") if nomes else None
+
+    _MUN_ATENDIDOS, _MUN_REGEX, _MUN_NOME2KEY = atend, regex, nome2key
+    logging.info("Municípios atendidos (raio das filiais): %d; nomes p/ busca no texto: %d.",
+                 len(atend), len(nomes))
+    return atend, regex, nome2key
 
 
 def _geocodificar_municipio(geocoder: Nominatim, municipio: str, uf: str) -> tuple[float, float] | None:
@@ -1077,6 +1165,7 @@ def _edital_para_linha(ed: dict, ts: str) -> list:
         ed.get("itens_encontrados", ""),
         ed.get("fonte", "PNCP"),
         ed.get("origem_plataforma", ""),
+        ed.get("local_obra", ""),
     ]
 
 

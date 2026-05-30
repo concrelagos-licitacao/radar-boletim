@@ -1319,6 +1319,19 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'</div>'
         ) if keyword_trig else ""
 
+        # Local da obra (quando difere da sede do órgão, ou "a confirmar")
+        _local_obra = str(d.get("local_obra") or "").strip()
+        if _local_obra == "a confirmar":
+            local_obra_html = ('<div style="font-size:0.8rem;color:#9A3412;margin-top:0.3rem;'
+                               'background:#FFF7ED;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #EA580C;">'
+                               '📍 <b>Local da obra:</b> a confirmar (órgão estadual/federal — verifique no edital/IA)</div>')
+        elif _local_obra:
+            local_obra_html = (f'<div style="font-size:0.8rem;color:#0F7A3D;margin-top:0.3rem;'
+                               f'background:#ECFDF5;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #16A34A;">'
+                               f'📍 <b>Local da obra:</b> {_local_obra} (≠ sede do órgão)</div>')
+        else:
+            local_obra_html = ""
+
         # Botões
         botoes = []
         if link_origem:
@@ -1343,6 +1356,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'<div class="cl-edital-objeto"><b>Objeto:</b> {origem_tag_html}{objeto[:400]}</div>'
             f'{kw_html}'
             f'{item_enc_html}'
+            f'{local_obra_html}'
             f'<div class="cl-edital-meta">'
             f'<div><b>Abertura:</b> {data_ab}</div>'
             f'<div><b>Órgão:</b> <span class="cl-orgao">{orgao}</span></div>'
