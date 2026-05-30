@@ -812,13 +812,21 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
 {texto_edital[:10000]}"""
 
     response = None
-    # Modelos gratuitos atuais (gemini-1.5-flash foi descontinuado na v1beta).
-    _MODELOS_GEMINI = [
-        "gemini-2.0-flash",
-        "gemini-2.5-flash",
-        "gemini-flash-latest",
-        "gemini-2.0-flash-001",
-    ]
+    # Descoberta dinâmica (à prova de renomeações do Google): pergunta à conta
+    # quais modelos existem e prioriza os 'flash' que suportam generateContent.
+    _MODELOS_GEMINI = []
+    try:
+        for _m in client.models.list():
+            _nome = (getattr(_m, "name", "") or "").split("/")[-1]
+            _acts = getattr(_m, "supported_actions", None) or []
+            if _nome and "flash" in _nome and "vision" not in _nome and ("generateContent" in _acts or not _acts):
+                _MODELOS_GEMINI.append(_nome)
+    except Exception:
+        pass
+    # Acrescenta candidatos conhecidos como reforço (sem duplicar)
+    for _c in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash-001"]:
+        if _c not in _MODELOS_GEMINI:
+            _MODELOS_GEMINI.append(_c)
     _ultimo_erro = ""
     for _modelo in _MODELOS_GEMINI:
         try:
