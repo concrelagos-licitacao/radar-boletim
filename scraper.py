@@ -909,7 +909,8 @@ def qualificar_por_distancia(
         if res is None and regex_obra is not None:
             mm = regex_obra.search(_normalize(ed["objeto"]))
             if mm:
-                key = nome2key.get(mm.group(1))
+                nome_obra = mm.group(1) or mm.group(2)
+                key = nome2key.get(nome_obra) if nome_obra else None
                 r2 = _match(coords_offline.get(key) if key else None, material, valor)
                 if r2:
                     res = r2
@@ -986,11 +987,14 @@ def _carregar_coords_offline() -> dict[tuple[str, str], tuple[float, float]]:
 _MUN_ATENDIDOS: dict[tuple[str, str], dict] | None = None
 _MUN_REGEX: "re.Pattern | None" = None
 _MUN_NOME2KEY: dict[str, tuple[str, str]] = {}
-# Nomes de municípios curtos/ambíguos que viram palavra comum no texto do edital.
+# Nomes de municípios que também são palavra comum (evita falso-positivo no texto).
 _MUN_BLOCKLIST = {
     "serra", "campos", "bonito", "alegre", "capela", "cristina", "patos",
     "boa vista", "santa rita", "bom jesus", "pirapora", "cataguases",
-    "central", "vargem", "monte", "matias", "lagoa", "areia",
+    "central", "vargem", "monte", "matias", "lagoa", "areia", "areias",
+    "aluminio", "salvador", "cachoeira", "serrinha", "tocantins", "claudio",
+    "castelo", "roque", "margarida", "vitoria", "uniao", "palmas", "pedra",
+    "lavras", "carmo", "rosario", "bela vista", "cordeiro", "porto", "barra",
 }
 
 
@@ -1029,7 +1033,17 @@ def _municipios_atendidos(filiais: dict[str, list[dict]]):
         if len(mun) >= 6 and mun not in _MUN_BLOCKLIST:
             nomes.append(mun)
     nomes.sort(key=len, reverse=True)  # casa o nome mais específico primeiro
-    regex = re.compile(r"\b(" + "|".join(re.escape(n) for n in nomes) + r")\b") if nomes else None
+    if nomes:
+        alt = "|".join(re.escape(n) for n in nomes)
+        # Exige CONTEXTO de local para evitar falso-positivo (ex.: "areias", "aluminio"):
+        #  (1) "municipio de X" / "cidade de X" / "comarca de X" ...
+        #  (2) "X/UF" ou "X - UF"  (UF dos nossos estados)
+        ctx = (r"(?:municipios?\s+de|cidade\s+de|comarca\s+de|distrito\s+de|"
+               r"localidade\s+de|na\s+cidade\s+de|sede\s+do\s+municipio\s+de)\s+(" + alt + r")\b")
+        suf = r"\b(" + alt + r")\s*[/\-]\s*(?:mg|sp|rj|es|pr|ba)\b"
+        regex = re.compile(ctx + "|" + suf)
+    else:
+        regex = None
 
     _MUN_ATENDIDOS, _MUN_REGEX, _MUN_NOME2KEY = atend, regex, nome2key
     logging.info("Municípios atendidos (raio das filiais): %d; nomes p/ busca no texto: %d.",
