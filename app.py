@@ -31,7 +31,7 @@ st.set_page_config(
     page_title="Concrelagos Intelligence Hub",
     page_icon="🏗️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # Proteções anti-crawler: pede a Google/Bing pra NÃO indexar (mitigação extra
@@ -294,6 +294,9 @@ st.markdown(
     .cl-btn-secondary{ background:#fff !important; color:#2563EB !important; border:1px solid #2563EB !important; }
     .cl-boletim-dia { background:#EAF7F0 !important; color:#0F7A3D !important; border-left:4px solid #15A24A; border-radius:6px; }
     .cl-header-bar { background:linear-gradient(90deg,#0E2A47 0%, #15A24A 160%) !important; border-radius:10px; }
+    .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #15A24A; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
+    .cl-boletim-head-title { font-size:1.4rem; font-weight:800; color:#0E2A47; }
+    .cl-boletim-head-sub { font-size:0.84rem; color:#6B7280; }
     /* Botões interativos do Streamlit como pílulas azuis (estilo ConLicitação) */
     .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
         border-radius:6px !important; font-weight:600 !important; font-size:0.82rem !important;
@@ -876,95 +879,36 @@ def _money(v: float) -> str:
 
 
 # ===== Sidebar / Filtros =====
-def _sidebar_filtros(ed: pd.DataFrame, fil: pd.DataFrame) -> dict:
-    st.sidebar.title("🔎 Filtros")
-    st.sidebar.caption("Aplicados a todas as abas")
-
-    ufs = sorted(
-        set(ed["uf"].dropna().tolist()  if "uf" in ed.columns  and not ed.empty  else [])
-        | set(fil["uf"].dropna().tolist() if "uf" in fil.columns and not fil.empty else [])
-    )
-    uf_sel = st.sidebar.multiselect("UF", ufs, default=ufs)
-
-    materiais = sorted(set(ed["material"].dropna().tolist())) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
-    mat_sel = st.sidebar.multiselect("Material", materiais, default=materiais)
-
-    # Filtro de confiança (score) — só aparece se a coluna existir
-    score_opcoes = {"CERTO (3)": 3, "PROVÁVEL (2)": 2, "POSSÍVEL (1)": 1}
-    if "score_label" in ed.columns and not ed.empty:
-        scores_presentes = sorted(ed["score"].dropna().unique().tolist(), reverse=True)
-        score_labels_presentes = [k for k, v in score_opcoes.items() if v in scores_presentes]
-        score_sel_labels = st.sidebar.multiselect(
-            "Confiança", score_labels_presentes, default=score_labels_presentes,
-            help="CERTO = keyword exata no objeto · PROVÁVEL = keyword indireta · POSSÍVEL = edital genérico (pode conter o produto)",
-        )
-        score_sel = [score_opcoes[l] for l in score_sel_labels]
-    else:
-        score_sel = []
-
-    valor_min = float(ed["valor_estimado"].min()) if not ed.empty and "valor_estimado" in ed.columns else 0.0
-    valor_max = float(ed["valor_estimado"].max()) if not ed.empty and "valor_estimado" in ed.columns else 10_000_000.0
-    valor_range = st.sidebar.slider(
-        "Valor estimado (R$)",
-        min_value=0.0,
-        max_value=max(valor_max, 1_000_000.0),
-        value=(0.0, max(valor_max, 1_000_000.0)),
-        step=10_000.0,
-        format="R$ %.0f",
-    )
-
-    dist_max = float(ed["distancia_km"].max()) if not ed.empty and "distancia_km" in ed.columns else 700.0
-    dist_lim = st.sidebar.slider("Distância máxima (km)", 0, max(int(dist_max), 700), max(int(dist_max), 700))
-
-    hoje = datetime.now().date()
-    # Padrão amplo: inclui editais do último ano para não cortar dados históricos.
-    # Quando a abertura do edital for futura, ainda assim mostra.
-    dt_de = st.sidebar.date_input("De", value=hoje - timedelta(days=365))
-    dt_ate = st.sidebar.date_input("Até", value=hoje + timedelta(days=180))
-
-    ocultar_lidos = st.sidebar.checkbox(
-        "🙈 Ocultar editais já lidos",
-        value=False,
-        help="Esconde editais marcados com o ícone 👁️ na aba Editais",
-    )
-
-    st.sidebar.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+def _sidebar_acoes() -> None:
+    """Barra lateral enxuta (recolhida por padrão) — sem filtros.
+    No modelo ConLicitação os filtros ficam no topo do Boletim, não na lateral."""
+    st.sidebar.markdown("### ⚙️ Painel")
+    st.sidebar.caption("Concrelagos Intelligence Hub")
     if st.sidebar.button("🔄 Recarregar dados", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    if st.sidebar.button("Sair", use_container_width=True):
+    if st.sidebar.button("🚪 Sair", use_container_width=True):
         st.session_state["autenticado"] = False
         st.rerun()
 
-    return {
-        "ufs": uf_sel,
-        "materiais": mat_sel,
-        "scores": score_sel,
-        "valor_min": valor_range[0],
-        "valor_max": valor_range[1],
-        "dist_lim": dist_lim,
-        "dt_de": dt_de,
-        "dt_ate": dt_ate,
-        "ocultar_lidos": ocultar_lidos,
-    }
-
 
 def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
+    """Aplica os filtros presentes no dict (todas as chaves são opcionais)."""
     if ed.empty:
         return ed
     df = ed.copy()
-    if "uf" in df.columns and filtros["ufs"]:
+    if "uf" in df.columns and filtros.get("ufs"):
         df = df[df["uf"].isin(filtros["ufs"])]
-    if "material" in df.columns and filtros["materiais"]:
+    if "material" in df.columns and filtros.get("materiais"):
         df = df[df["material"].isin(filtros["materiais"])]
     if "score" in df.columns and filtros.get("scores"):
         df["score"] = pd.to_numeric(df["score"], errors="coerce")
         df = df[df["score"].isin(filtros["scores"])]
-    if "valor_estimado" in df.columns:
+    if "valor_estimado" in df.columns and filtros.get("valor_min") is not None:
         df = df[(df["valor_estimado"] >= filtros["valor_min"]) & (df["valor_estimado"] <= filtros["valor_max"])]
-    if "distancia_km" in df.columns:
+    if "distancia_km" in df.columns and filtros.get("dist_lim") is not None:
         df = df[df["distancia_km"] <= filtros["dist_lim"]]
-    if "data_abertura" in df.columns:
+    if filtros.get("dt_de") and filtros.get("dt_ate") and "data_abertura" in df.columns:
         df = df[(df["data_abertura"].dt.date >= filtros["dt_de"]) & (df["data_abertura"].dt.date <= filtros["dt_ate"])]
     if filtros.get("ocultar_lidos") and "numero_controle_pncp" in df.columns:
         lidos = _lidos_set()
@@ -1106,13 +1050,44 @@ def _exportar_excel(df: pd.DataFrame) -> bytes:
 
 
 def _aba_editais(ed: pd.DataFrame) -> None:
-    st.subheader("📋 Boletim de Licitações")
-
     if ed.empty:
+        st.subheader("📋 Boletim de Licitações")
         st.info("Nenhuma licitação ainda. Rode `python scraper.py` para popular.")
         return
 
-    # ----- Filtros (modelo ConLicitação) -----
+    # ===== Cabeçalho do boletim (estilo ConLicitação) =====
+    st.markdown(
+        '<div class="cl-boletim-head">'
+        '<span class="cl-boletim-head-title">📋 Boletim de Licitações</span>'
+        '<span class="cl-boletim-head-sub">Concreto usinado &amp; brita · Pregão Eletrônico · Pregão Presencial · Dispensa</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ===== Filtros principais no topo (como ConLicitação — sem barra lateral) =====
+    fc1, fc2, fc3, fc4 = st.columns([1.3, 1, 1, 1.5])
+    with fc1:
+        ufs_disp = sorted(ed["uf"].dropna().unique().tolist()) if "uf" in ed.columns and not ed.empty else []
+        uf_sel = st.multiselect("Estados", ufs_disp, default=ufs_disp)
+    with fc2:
+        mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
+        mat_sel = st.multiselect("Material", mats, default=mats)
+    with fc3:
+        _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
+        _sc_labels = st.multiselect("Confiança", list(_score_op), default=list(_score_op))
+        score_sel = [_score_op[l] for l in _sc_labels]
+    with fc4:
+        # Slider de valor MÍNIMO (leve: 0 a 2 mi, passo 50 mil). Editais acima do
+        # teto continuam aparecendo (é piso, não topo).
+        valor_min_sel = st.slider("Valor mínimo (R$)", 0, 2_000_000, 0,
+                                  step=50_000, format="R$ %d")
+
+    ed = _aplica_filtros(ed, {
+        "ufs": uf_sel, "materiais": mat_sel, "scores": score_sel,
+        "valor_min": float(valor_min_sel), "valor_max": float("inf"),
+    })
+
+    # ----- Busca / ordenação / situação / portal (modelo ConLicitação) -----
     col_a, col_b, col_c = st.columns([2, 1, 1])
     with col_a:
         busca = st.text_input("🔎 Buscar por órgão, município ou objeto", placeholder="ex: prefeitura, concreto…")
@@ -1578,8 +1553,7 @@ def main() -> None:
         return
 
     fil, ed, ultima = _carregar_dados()
-    filtros = _sidebar_filtros(ed, fil)
-    ed_f = _aplica_filtros(ed, filtros)
+    _sidebar_acoes()
 
     # Usa a data real da última execução do scraper (aba Execucoes),
     # com fallback para a data do último edital encontrado.
@@ -1616,11 +1590,11 @@ def main() -> None:
     # do site antigo; Diário mostra a saúde do scraper (uso interno).
     tab1, tab2, tab3 = st.tabs(["📋 Boletim", "🗺️ Mapa", "📅 Diário"])
     with tab1:
-        _aba_editais(ed_f)
+        _aba_editais(ed)
     with tab2:
-        _aba_mapa(ed_f, fil)
+        _aba_mapa(ed, fil)
     with tab3:
-        _aba_diario(ed_f, ultima)
+        _aba_diario(ed, ultima)
 
 
 if __name__ == "__main__":
