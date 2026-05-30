@@ -97,9 +97,29 @@ KEYWORDS_CONCRETO: dict[int, tuple[str, ...]] = {
         "concretagem",
         "concreto armado",
     ),
-    1: (  # POSSÍVEL — genérico; passa pelo enriquecimento por itens
+    1: (  # POSSÍVEL — obras/materiais onde concreto pode estar escondido.
+          # Passam pelo enriquecimento por itens (grátis) e podem ser lidos pela IA
+          # sob demanda no card. Geo (70km de usina) limita o ruído.
         "materiais de construcao",
         "material de construcao",
+        "execucao de obra",
+        "obra de engenharia",
+        "obras de engenharia",
+        "empresa de engenharia",
+        "construcao de",
+        "reforma e ampliacao",
+        "reforma de",
+        "ampliacao de",
+        "pavimentacao",            # asfáltica/CBUQ é barrada pela lista de exclusão
+        "pavimento rigido",
+        "drenagem",
+        "saneamento",
+        "infraestrutura",
+        "recapeamento",
+        "terraplenagem",
+        "calcamento",
+        "obras de arte",
+        "reservatorio",
     ),
 }
 # BRITA e todas as variações/disfarces de nome (agregado graúdo de pedra britada).
@@ -135,9 +155,22 @@ KEYWORDS_BRITA: dict[int, tuple[str, ...]] = {
         "agregado",              # só score 2 (evita "agregado miúdo" = areia)
         "agregados",
     ),
-    1: (  # POSSÍVEL — genérico
+    1: (  # POSSÍVEL — obras onde brita costuma se esconder (RJ). Itens/IA confirmam.
         "materiais de construcao",
         "material de construcao",
+        "execucao de obra",
+        "obra de engenharia",
+        "obras de engenharia",
+        "pavimentacao",
+        "drenagem",
+        "terraplenagem",
+        "estrada",
+        "recuperacao de estrada",
+        "lastro",
+        "sub-base",
+        "base e sub-base",
+        "cascalhamento",
+        "construcao de",
     ),
 }
 
