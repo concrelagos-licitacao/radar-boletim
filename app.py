@@ -297,17 +297,29 @@ st.markdown(
     .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #15A24A; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
     .cl-boletim-head-title { font-size:1.4rem; font-weight:800; color:#0E2A47; }
     .cl-boletim-head-sub { font-size:0.84rem; color:#6B7280; }
-    /* Botões interativos do Streamlit como pílulas azuis (estilo ConLicitação) */
+    /* Botões interativos do Streamlit como pílulas azuis pequenas (estilo ConLicitação) */
     .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
-        border-radius:6px !important; font-weight:600 !important; font-size:0.82rem !important;
+        border-radius:6px !important; font-weight:600 !important; font-size:0.78rem !important;
+        padding:0.28rem 0.7rem !important; min-height:0 !important;
         background:#2563EB !important; border:1px solid #2563EB !important;
     }
     .stButton button *, [data-testid="stButton"] button * { color:#fff !important; }
     .stButton button:hover, [data-testid="stButton"] button:hover { background:#1D4ED8 !important; border-color:#1D4ED8 !important; }
     .stDownloadButton button, [data-testid="stDownloadButton"] button {
-        background:#15A24A !important; border:1px solid #15A24A !important; border-radius:6px !important; font-weight:600 !important;
+        background:#15A24A !important; border:1px solid #15A24A !important; border-radius:6px !important;
+        font-weight:600 !important; font-size:0.78rem !important; padding:0.28rem 0.7rem !important;
     }
     .stDownloadButton button * { color:#fff !important; }
+    /* Gatilho do popover "Mais filtros" — discreto, contorno azul */
+    [data-testid="stPopover"] button { background:#fff !important; border:1px solid #2563EB !important; }
+    [data-testid="stPopover"] button * { color:#2563EB !important; }
+    /* Total de licitações */
+    .cl-total { color:#374151; font-size:0.95rem; padding-top:0.4rem; }
+    /* Ritmo: cards juntos, ações coladas, expander compacto */
+    .cl-edital-card { margin-bottom:0.35rem !important; }
+    .cl-edital-actions { padding:0.5rem 1.1rem !important; }
+    [data-testid="stExpander"] { border:none !important; margin:0.1rem 0 0.15rem 0 !important; }
+    [data-testid="stExpander"] summary { font-size:0.83rem !important; color:#2563EB !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1083,54 +1095,41 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
-    # ===== Filtros principais no topo (como ConLicitação — sem barra lateral) =====
-    fc1, fc2, fc3, fc4 = st.columns([1.3, 1, 1, 1.5])
+    # ===== Filtros: UMA linha limpa + "Mais filtros" (modelo ConLicitação) =====
+    fc1, fc2, fc3, fc4 = st.columns([1.1, 1, 2, 1.2])
     with fc1:
         ufs_disp = sorted(ed["uf"].dropna().unique().tolist()) if "uf" in ed.columns and not ed.empty else []
         uf_sel = st.multiselect("Estados", ufs_disp, default=ufs_disp)
     with fc2:
+        situacao = st.selectbox("Situação", ["Todas", "Abertas", "Encerradas"],
+                                help="Abertas = prazo de proposta ainda no futuro")
+    with fc3:
+        busca = st.text_input("Buscar", placeholder="🔎 órgão, município ou objeto…")
+    with fc4:
+        ordem = st.selectbox("Ordenar por", ["Mais recente", "Maior valor", "Menor distância", "Data abertura"])
+
+    # --- Demais filtros recolhidos (deixa o topo limpo) ---
+    with st.popover("⚙️ Mais filtros", use_container_width=False):
         mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
         mat_sel = st.multiselect("Material", mats, default=mats)
-    with fc3:
         _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
         _sc_labels = st.multiselect("Confiança", list(_score_op), default=list(_score_op))
         score_sel = [_score_op[l] for l in _sc_labels]
-    with fc4:
-        # Slider de valor MÍNIMO (leve: 0 a 2 mi, passo 50 mil). Editais acima do
-        # teto continuam aparecendo (é piso, não topo).
-        valor_min_sel = st.slider("Valor mínimo (R$)", 0, 2_000_000, 0,
-                                  step=50_000, format="R$ %d")
-
-    ed = _aplica_filtros(ed, {
-        "ufs": uf_sel, "materiais": mat_sel, "scores": score_sel,
-        "valor_min": float(valor_min_sel), "valor_max": float("inf"),
-    })
-
-    # ----- Busca / ordenação / situação / portal (modelo ConLicitação) -----
-    col_a, col_b, col_c = st.columns([2, 1, 1])
-    with col_a:
-        busca = st.text_input("🔎 Buscar por órgão, município ou objeto", placeholder="ex: prefeitura, concreto…")
-    with col_b:
-        ordem = st.selectbox("Ordenar por", ["Mais recente", "Maior valor", "Menor distância", "Data abertura"])
-    with col_c:
-        modo = st.radio("Modo", ["Cards", "Tabela"], horizontal=True, label_visibility="collapsed")
-
-    col_d, col_e, col_f = st.columns([1, 1, 1])
-    with col_d:
-        situacao = st.selectbox("Situação", ["Todas", "Abertas", "Encerradas"],
-                                help="Abertas = prazo de proposta ainda no futuro")
-    with col_e:
-        # Portais/plataformas presentes nos dados
+        valor_min_sel = st.slider("Valor mínimo (R$)", 0, 2_000_000, 0, step=50_000, format="R$ %d")
         portais = sorted({
             str(p).strip() for p in (
                 list(ed.get("origem_plataforma", pd.Series([], dtype=str)).dropna())
                 + list(ed.get("fonte", pd.Series([], dtype=str)).dropna())
             ) if str(p).strip()
         })
-        portal_sel = st.multiselect("Portal / origem", portais, default=portais,
-                                    help="Plataforma onde o edital foi publicado")
-    with col_f:
+        portal_sel = st.multiselect("Portal / origem", portais, default=portais)
         so_favoritas = st.checkbox("⭐ Só favoritas", value=False)
+        modo = st.radio("Exibição", ["Cards", "Tabela"], horizontal=True)
+
+    ed = _aplica_filtros(ed, {
+        "ufs": uf_sel, "materiais": mat_sel, "scores": score_sel,
+        "valor_min": float(valor_min_sel), "valor_max": float("inf"),
+    })
 
     df = ed.copy()
 
@@ -1176,19 +1175,24 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         elif "data_execucao" in df.columns:
             df = df.sort_values("data_execucao", ascending=False)
 
-    # ----- Exportar (Excel + CSV) -----
-    exp1, exp2, _ = st.columns([1, 1, 3])
-    with exp1:
+    # ----- Faixa compacta: total à esquerda + exportar à direita -----
+    tcol, ecol1, ecol2 = st.columns([4, 1, 1])
+    with tcol:
+        st.markdown(
+            f'<div class="cl-total">Total de <b>{len(df)}</b> licitação(ões)</div>',
+            unsafe_allow_html=True,
+        )
+    with ecol1:
         try:
             st.download_button(
-                "📊 Gerar Excel", data=_exportar_excel(df),
+                "📊 Excel", data=_exportar_excel(df),
                 file_name=f"licitacoes_{datetime.now():%Y%m%d}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
         except Exception:
             pass
-    with exp2:
+    with ecol2:
         st.download_button(
             "📥 CSV", data=df.to_csv(index=False).encode("utf-8"),
             file_name=f"licitacoes_{datetime.now():%Y%m%d}.csv", mime="text/csv",
@@ -1196,7 +1200,6 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         )
 
     if modo == "Tabela":
-        st.caption(f"**{len(df)}** licitação(ões) encontrada(s)")
         st.dataframe(df, use_container_width=True, hide_index=True)
         return
 
@@ -1216,13 +1219,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
 
     if total == 0:
         st.caption("Nenhuma licitação encontrada com esses filtros.")
-    elif n_paginas == 1:
-        st.caption(f"**{total}** licitação(ões) encontrada(s)")
-    else:
-        st.caption(
-            f"**{total}** licitação(ões) — "
-            f"mostrando {start + 1}–{end} · página {pagina + 1} de {n_paginas}"
-        )
+    elif n_paginas > 1:
+        st.caption(f"Mostrando {start + 1}–{end} · página {pagina + 1} de {n_paginas}")
 
     # Agrupamento por dia (seções tipo "boletim") só quando ordenado por data
     _agrupar_por_dia = ordem in ("Mais recente", "Data abertura")
@@ -1386,23 +1384,23 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             if _links:
                 st.markdown(" · ".join(_links))
 
-        # ----- Botões Streamlit (interativos) -----
-        bcol1, bcol2, bcol3 = st.columns(3)
+        # ----- Ações: uma fileira compacta de botões pequenos (estilo ConLicitação) -----
+        bcol1, bcol2, bcol3, _bspace = st.columns([1.2, 1.3, 1.1, 5])
         with bcol1:
-            _lbl_lido = "✅ Lido" if ja_lido else "👁️ Marcar lido"
+            _lbl_lido = "✅ Lido" if ja_lido else "👁️ Lido"
             if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", use_container_width=True,
-                         help="Clique para desmarcar" if ja_lido else "Marca como revisado"):
+                         help="Marcar/desmarcar como revisada"):
                 _desmarcar_lido(num_controle) if ja_lido else _marcar_lido(num_controle)
                 st.rerun()
         with bcol2:
             _lbl_fav = "★ Favorita" if ja_fav else "☆ Favoritar"
             if st.button(_lbl_fav, key=f"fav_{idx}_{num_controle}", use_container_width=True,
-                         help="Clique para desfavoritar" if ja_fav else "Marca como favorita"):
+                         help="Marcar/desmarcar favorita"):
                 _desmarcar_fav(num_controle) if ja_fav else _marcar_fav(num_controle)
                 st.rerun()
         _ia_click = False
         with bcol3:
-            _ia_click = st.button("🤖 Analisar com IA", key=f"ia_{idx}_{num_edital}",
+            _ia_click = st.button("🤖 IA", key=f"ia_{idx}_{num_edital}",
                                   use_container_width=True,
                                   help="Gemini lê o PDF e extrai produto, quantidade, prazo e recomendação")
         if _ia_click:
@@ -1443,7 +1441,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 unsafe_allow_html=True,
             )
 
-        st.markdown('<div style="margin-bottom:0.5rem;"></div>', unsafe_allow_html=True)
+        st.markdown('<div style="border-bottom:1px solid #EEF1F4;margin:0.15rem 0 0.7rem 0;"></div>', unsafe_allow_html=True)
 
     # ----- Navegação de páginas -----
     if n_paginas > 1:
