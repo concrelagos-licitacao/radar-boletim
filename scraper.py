@@ -901,13 +901,18 @@ def qualificar_por_distancia(
         valor = ed.get("valor_estimado") or 0
         local_obra = ""
         obra_coord = None
+        esf = str(ed.get("esfera", "")).strip().lower()
+        eh_estad_fed = esf[:1] in ("e", "f")
+        cobertos = ESTADOS_BRITA if material == "brita" else ESTADOS_CONCRETO
 
         # A) qualifica pelo município do ÓRGÃO
         res = _match(origem, material, valor)
 
-        # B) qualifica pelo LOCAL DA OBRA citado no objeto (capta estaduais/federais
-        #    cuja SEDE é longe mas a obra é perto de uma usina/pedreira)
-        if res is None and regex_obra is not None:
+        # B) qualifica pelo LOCAL DA OBRA citado no objeto — SÓ para órgãos
+        #    Estaduais/Federais (DER, DNIT, saneamento...). Prefeitura (municipal)
+        #    compra para o PRÓPRIO município, então casar uma obra distante no
+        #    texto seria falso-positivo (ex.: órgão no PI casando "Santos/SP").
+        if res is None and regex_obra is not None and eh_estad_fed:
             mm = regex_obra.search(_normalize(ed["objeto"]))
             if mm:
                 nome_obra = mm.group(1) or mm.group(2)
@@ -917,9 +922,15 @@ def qualificar_por_distancia(
                 if r2:
                     res = r2
                     local_obra = f"{key[0].title()}/{key[1]}"
+                    # A OBRA vira a localização exibida (cidade/UF que de fato atendemos),
+                    # não a sede do órgão.
+                    ed["municipio"], ed["uf"] = key[0].title(), key[1]
                     por_obra += 1
 
         if res:
+            # Trava final: só estados que cobrimos (concreto: MG/SP/ES/RJ/PR/BA; brita: RJ).
+            if ed["uf"] not in cobertos:
+                continue  # fora da nossa área de atuação — descarta
             tipo, f, dist = res
             ed["tipo_atendimento"] = tipo
             ed["filial_mais_proxima"] = f"{f['nome']} ({f['municipio']}/{f['uf']})"
@@ -934,9 +945,9 @@ def qualificar_por_distancia(
             continue
 
         # C) Estadual/Federal com sinal forte (score 3) e sem local detectável →
-        #    mantém como POSSÍVEL "a confirmar" (não descarta pela SEDE do órgão).
-        esf = str(ed.get("esfera", "")).strip().lower()
-        if esf[:1] in ("e", "f") and int(ed.get("score") or 0) >= 3:
+        #    "a confirmar", MAS só se a SEDE do órgão estiver num estado coberto
+        #    (não deixa surgir UF que não atendemos).
+        if eh_estad_fed and int(ed.get("score") or 0) >= 3 and uf in cobertos:
             ed["tipo_atendimento"] = "local_a_confirmar"
             ed["local_obra"] = "a confirmar"
             ed["filial_mais_proxima"] = ""
@@ -1000,6 +1011,7 @@ _MUN_BLOCKLIST = {
     "aluminio", "salvador", "cachoeira", "serrinha", "tocantins", "claudio",
     "castelo", "roque", "margarida", "vitoria", "uniao", "palmas", "pedra",
     "lavras", "carmo", "rosario", "bela vista", "cordeiro", "porto", "barra",
+    "santos", "atalaia",  # sobrenome/nome comum → falso-positivo em texto
 }
 
 
@@ -1021,7 +1033,9 @@ def _municipios_atendidos(filiais: dict[str, list[dict]]):
     pedreiras = filiais.get("pedreiras") or []
     atend: dict[tuple[str, str], dict] = {}
     for (mun, uf), origem in coords.items():
-        if usinas:
+        # Só municípios nos estados que cobrimos (concreto) — evita casar obra
+        # em estado fora da área e reduz o regex de busca no texto.
+        if usinas and uf in ESTADOS_CONCRETO:
             du, fu = _menor_distancia(origem, usinas)
             if du is not None and du <= RAIO_USINA_KM:
                 atend[(mun, uf)] = {"filial": fu, "dist_km": round(du, 2), "tipo": "usina"}
