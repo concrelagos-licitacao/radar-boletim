@@ -27,9 +27,10 @@ import pydeck as pdk
 import streamlit as st
 
 # ===== Config inicial =====
+_ICON = Path(__file__).resolve().parent / "assets" / "logo.png"
 st.set_page_config(
     page_title="Concrelagos Intelligence Hub",
-    page_icon="🏗️",
+    page_icon=str(_ICON) if _ICON.exists() else None,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -886,7 +887,7 @@ Edital (primeiros {min(len(texto_edital), 10000)} caracteres):
     if response is None:
         if "429" in _ultimo_erro or "RESOURCE_EXHAUSTED" in _ultimo_erro:
             st.warning(
-                "⚠️ **Cota gratuita do Gemini esgotada** por hoje. A cota renova às 00h UTC. "
+                "**Cota gratuita do Gemini esgotada** por hoje. A cota renova às 00h UTC. "
                 "Tente novamente mais tarde."
             )
         else:
@@ -965,12 +966,12 @@ def _money(v: float) -> str:
 def _sidebar_acoes() -> None:
     """Barra lateral enxuta (recolhida por padrão) — sem filtros.
     No modelo ConLicitação os filtros ficam no topo do Boletim, não na lateral."""
-    st.sidebar.markdown("### ⚙️ Painel")
+    st.sidebar.markdown("### Painel")
     st.sidebar.caption("Concrelagos Intelligence Hub")
-    if st.sidebar.button("🔄 Recarregar dados", width='stretch'):
+    if st.sidebar.button("Recarregar dados", width='stretch'):
         st.cache_data.clear()
         st.rerun()
-    if st.sidebar.button("🚪 Sair", width='stretch'):
+    if st.sidebar.button("Sair", width='stretch'):
         st.session_state["autenticado"] = False
         st.rerun()
 
@@ -1134,14 +1135,14 @@ def _exportar_excel(df: pd.DataFrame) -> bytes:
 
 def _aba_editais(ed: pd.DataFrame) -> None:
     if ed.empty:
-        st.subheader("📋 Boletim de Licitações")
+        st.subheader("Boletim de Licitações")
         st.info("Nenhuma licitação ainda. Rode `python scraper.py` para popular.")
         return
 
     # ===== Cabeçalho do boletim (estilo ConLicitação) =====
     st.markdown(
         '<div class="cl-boletim-head">'
-        '<span class="cl-boletim-head-title">📋 Boletim de Licitações</span>'
+        '<span class="cl-boletim-head-title">Boletim de Licitações</span>'
         '<span class="cl-boletim-head-sub">Concreto usinado &amp; brita · Pregão Eletrônico · Pregão Presencial · Dispensa</span>'
         '</div>',
         unsafe_allow_html=True,
@@ -1161,15 +1162,15 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         _default_ufs = [u for u in _uf_qp if u in ufs_disp] or ufs_disp
         uf_sel = st.multiselect("Estados", ufs_disp, default=_default_ufs)
     with fc2:
-        situacao = st.selectbox("Situação", ["Todas", "Abertas", "Encerradas"],
-                                help="Abertas = prazo de proposta ainda no futuro")
+        situacao = st.selectbox("Situação", ["Abertas", "Todas", "Encerradas"],
+                                help="Abertas = pregão ainda não ocorreu (padrão). Encerrados ficam ocultos.")
     with fc3:
         busca = st.text_input("Buscar", placeholder="🔎 órgão, município ou objeto…")
     with fc4:
         ordem = st.selectbox("Ordenar por", ["Mais recente", "Maior valor", "Menor distância", "Data abertura"])
 
     # --- Demais filtros recolhidos (deixa o topo limpo) ---
-    with st.popover("⚙️ Mais filtros", width='content'):
+    with st.popover("Mais filtros", width='content'):
         mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
         mat_sel = st.multiselect("Material", mats, default=mats)
         _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
@@ -1183,7 +1184,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             ) if str(p).strip()
         })
         portal_sel = st.multiselect("Portal / origem", portais, default=portais)
-        so_favoritas = st.checkbox("⭐ Só favoritas", value=False)
+        so_favoritas = st.checkbox("Só favoritas", value=False)
         modo = st.radio("Exibição", ["Cards", "Tabela"], horizontal=True)
 
     ed = _aplica_filtros(ed, {
@@ -1203,13 +1204,18 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         )
         df = df[mask]
 
-    # Situação (aberta/encerrada) por data de encerramento (fallback: abertura)
+    # Situação: por padrão remove pregões que já aconteceram (encerrados).
+    # Usa a data de encerramento (prazo) e, na falta, a de abertura/sessão.
     if situacao != "Todas":
         base = df["data_encerramento"] if "data_encerramento" in df.columns and df["data_encerramento"].notna().any() else df.get("data_abertura")
         if base is not None:
             b = pd.to_datetime(base, errors="coerce", utc=True)
             agora = pd.Timestamp.now(tz="UTC")
-            df = df[(b >= agora)] if situacao == "Abertas" else df[(b < agora)]
+            if situacao == "Abertas":
+                # mantém os ainda abertos; editais SEM data não são descartados.
+                df = df[b.isna() | (b >= agora)]
+            else:  # Encerradas
+                df = df[b < agora]
 
     # Portal / origem
     if portal_sel and ("origem_plataforma" in df.columns or "fonte" in df.columns):
@@ -1245,7 +1251,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     with ecol1:
         try:
             st.download_button(
-                "📊 Excel", data=_exportar_excel(df),
+                "Excel", data=_exportar_excel(df),
                 file_name=f"licitacoes_{datetime.now():%Y%m%d}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 width='stretch',
@@ -1254,7 +1260,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             pass
     with ecol2:
         st.download_button(
-            "📥 CSV", data=df.to_csv(index=False).encode("utf-8"),
+            "CSV", data=df.to_csv(index=False).encode("utf-8"),
             file_name=f"licitacoes_{datetime.now():%Y%m%d}.csv", mime="text/csv",
             width='stretch',
         )
@@ -1303,7 +1309,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 _dia_atual = _dia
                 _label_dia = _dia.strftime("%d/%m/%Y") if _dia else "Sem data"
                 st.markdown(
-                    f'<div class="cl-boletim-dia">📅 {_label_dia}</div>',
+                    f'<div class="cl-boletim-dia">{_label_dia}</div>',
                     unsafe_allow_html=True,
                 )
         urgente = _eh_urgente(d.get("data_abertura"))
@@ -1330,8 +1336,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         ja_fav = num_controle in _favs_set()
         card_extra_class = "cl-edital-card-lido" if ja_lido else ""
         icones_hdr_html = (
-            f'<span class="cl-hdr-icon {"on-fav" if ja_fav else ""}" title="Favorita">★</span>'
-            f'<span class="cl-hdr-icon {"on-lido" if ja_lido else ""}" title="Lida">👁</span>'
+            f'<span class="cl-hdr-icon {"on-fav" if ja_fav else ""}" title="Favorita">{"★" if ja_fav else "☆"}</span>'
+            f'<span class="cl-hdr-icon {"on-lido" if ja_lido else ""}" title="Lida">{"✓" if ja_lido else "○"}</span>'
         )
 
         # Plataforma de origem: tag no objeto + chip na meta (igual ConLicitação)
@@ -1348,7 +1354,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             score_val = int(d.get("score") or 0)
         except (ValueError, TypeError):
             score_val = 0
-        _score_map = {3: ("cl-score-3", "✅ CERTO"), 2: ("cl-score-2", "⚠️ PROVÁVEL"), 1: ("cl-score-1", "🔍 POSSÍVEL")}
+        _score_map = {3: ("cl-score-3", "CERTO"), 2: ("cl-score-2", "PROVÁVEL"), 1: ("cl-score-1", "POSSÍVEL")}
         score_cls, score_txt = _score_map.get(score_val, ("cl-score-1", ""))
         tag_score_html = f'<span class="{score_cls}">{score_txt}</span>' if score_val else ""
 
@@ -1384,20 +1390,20 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         if _local_obra == "a confirmar":
             local_obra_html = ('<div style="font-size:0.8rem;color:#9A3412;margin-top:0.3rem;'
                                'background:#FFF7ED;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #EA580C;">'
-                               '📍 <b>Local da obra:</b> a confirmar (órgão estadual/federal — verifique no edital/IA)</div>')
+                               '<b>Local da obra:</b> a confirmar (órgão estadual/federal — verifique no edital/IA)</div>')
         elif _local_obra:
             local_obra_html = (f'<div style="font-size:0.8rem;color:#8A6A1E;margin-top:0.3rem;'
-                               f'background:#FBF3E3;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #16A34A;">'
-                               f'📍 <b>Local da obra:</b> {_local_obra} (≠ sede do órgão)</div>')
+                               f'background:#FBF3E3;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #C28E2C;">'
+                               f'<b>Local da obra:</b> {_local_obra} (≠ sede do órgão)</div>')
         else:
             local_obra_html = ""
 
         # Botões
         botoes = []
         if link_origem:
-            botoes.append(f'<a class="cl-btn cl-btn-primary" href="{link_origem}" target="_blank">📥 Baixar Edital</a>')
+            botoes.append(f'<a class="cl-btn cl-btn-primary" href="{link_origem}" target="_blank">Baixar Edital</a>')
         if link_pncp:
-            botoes.append(f'<a class="cl-btn cl-btn-secondary" href="{link_pncp}" target="_blank">🔍 Ver no PNCP</a>')
+            botoes.append(f'<a class="cl-btn cl-btn-secondary" href="{link_pncp}" target="_blank">Ver no PNCP</a>')
         botoes_html = "".join(botoes) if botoes else '<span style="color:#9CA3AF;font-size:0.85rem;">Sem links disponíveis</span>'
 
         modal_suffix = f" · {modalidade}" if modalidade else ""
@@ -1420,7 +1426,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'<div class="cl-edital-meta">'
             f'<div><b>Abertura:</b> {data_ab}</div>'
             f'<div><b>Órgão:</b> <span class="cl-orgao">{orgao}</span></div>'
-            f'<div><b>Cidade:</b> 📍 {cidade}</div>'
+            f'<div><b>Cidade:</b> {cidade}</div>'
             f'<div><b>Edital:</b> {num_edital}{modal_suffix}</div>'
             f'<div><b>Valor estimado:</b> <span class="cl-valor">{valor}</span></div>'
             f'<div><b>Origem:</b> {src_chip_html} · '
@@ -1452,16 +1458,16 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 st.markdown(f"**Item encontrado no edital:** {itens_enc[:300]}")
             _links = []
             if link_origem:
-                _links.append(f"[📥 Baixar edital (origem)]({link_origem})")
+                _links.append(f"[Baixar edital (origem)]({link_origem})")
             if link_pncp:
-                _links.append(f"[🔍 Ver no PNCP]({link_pncp})")
+                _links.append(f"[Ver no PNCP]({link_pncp})")
             if _links:
                 st.markdown(" · ".join(_links))
 
         # ----- Ações: uma fileira compacta de botões pequenos (estilo ConLicitação) -----
         bcol1, bcol2, bcol3, _bspace = st.columns([1.2, 1.3, 1.1, 5])
         with bcol1:
-            _lbl_lido = "✅ Lido" if ja_lido else "👁️ Lido"
+            _lbl_lido = "✓ Lido" if ja_lido else "Lido"
             if st.button(_lbl_lido, key=f"lido_{idx}_{num_controle}", width='stretch',
                          help="Marcar/desmarcar como revisada"):
                 _desmarcar_lido(num_controle) if ja_lido else _marcar_lido(num_controle)
@@ -1474,7 +1480,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 st.rerun()
         _ia_click = False
         with bcol3:
-            _ia_click = st.button("🤖 IA", key=f"ia_{idx}_{num_edital}",
+            _ia_click = st.button("IA", key=f"ia_{idx}_{num_edital}",
                                   width='stretch',
                                   help="Gemini lê o PDF e extrai produto, quantidade, prazo e recomendação")
         if _ia_click:
@@ -1498,7 +1504,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             st.markdown(
                 f'<div class="cl-ia-box">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">'
-                f'<span style="font-weight:600;font-size:0.88rem;color:#0369A1;">🤖 Análise IA</span>'
+                f'<span style="font-weight:700;font-size:0.88rem;color:#3A4149;">Análise IA</span>'
                 f'<span class="{rec_class}">{rec}</span>'
                 f'</div>'
                 f'<div style="font-size:0.85rem;color:#1F2937;margin-bottom:0.25rem;">'
@@ -1682,7 +1688,7 @@ def main() -> None:
 
     # Modelo ConLicitação: Boletim é a tela principal; Mapa é o que preservamos
     # do site antigo; Diário mostra a saúde do scraper (uso interno).
-    tab1, tab2, tab3 = st.tabs(["📋 Boletim", "🗺️ Mapa", "📅 Diário"])
+    tab1, tab2, tab3 = st.tabs(["Boletim", "Mapa", "Diário"])
     with tab1:
         _aba_editais(ed)
     with tab2:
