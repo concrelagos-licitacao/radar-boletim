@@ -268,6 +268,43 @@ st.markdown(
         background:#ECFDF5; color:#047857; font-size:0.7rem; font-weight:700;
         padding:0.1rem 0.4rem; border-radius:3px;
     }
+
+    /* =========================================================
+       OVERRIDE VISUAL — modelo ConLicitação (tema claro + verde)
+       ========================================================= */
+    .cl-edital-card { border:1px solid #E6E8EB; border-radius:10px; box-shadow:0 2px 10px rgba(16,42,71,0.08); margin-bottom:1.1rem; }
+    .cl-edital-header { background:#2D323B !important; padding:0.5rem 0.9rem !important; }
+    .cl-hdr-left { display:flex; align-items:center; gap:0.45rem; }
+    .cl-hdr-right { display:flex; align-items:center; gap:0.45rem; }
+    .cl-edital-num { background:#15A24A !important; color:#fff !important; min-width:26px !important; height:26px !important; width:auto !important; padding:0 0.45rem; border-radius:13px !important; font-size:0.82rem; }
+    .cl-hdr-icon { width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,0.16); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.82rem; }
+    .cl-hdr-icon.on-fav  { background:#F59E0B; color:#fff; }
+    .cl-hdr-icon.on-lido { background:#15A24A; color:#fff; }
+    .cl-edital-body { padding:0.9rem 1.1rem !important; }
+    .cl-edital-objeto { color:#111827 !important; font-size:0.95rem; }
+    .cl-edital-meta { gap:0.45rem 1.6rem !important; font-size:0.87rem !important; color:#374151 !important; }
+    .cl-edital-meta b { color:#9CA3AF !important; font-weight:600 !important; }
+    .cl-valor { color:#E8730C; font-weight:800; font-size:1.05rem; }
+    .cl-orgao { color:#2563EB; font-weight:600; }
+    .cl-src-chip { display:inline-block; border:1px solid #D1D5DB; border-radius:6px; padding:0.08rem 0.5rem; font-size:0.7rem; font-weight:700; color:#374151; background:#F9FAFB; }
+    .cl-origem-tag { background:#E7F8EF !important; color:#0F7A3D !important; padding:0.1rem 0.45rem !important; border-radius:4px !important; }
+    .cl-edital-actions { background:#F8FAFC !important; border-top:1px solid #EDF0F3 !important; padding:0.7rem 1.1rem !important; }
+    .cl-edital-actions-label { font-weight:600 !important; }
+    .cl-btn-primary  { background:#2563EB !important; color:#fff !important; }
+    .cl-btn-secondary{ background:#fff !important; color:#2563EB !important; border:1px solid #2563EB !important; }
+    .cl-boletim-dia { background:#EAF7F0 !important; color:#0F7A3D !important; border-left:4px solid #15A24A; border-radius:6px; }
+    .cl-header-bar { background:linear-gradient(90deg,#0E2A47 0%, #15A24A 160%) !important; border-radius:10px; }
+    /* Botões interativos do Streamlit como pílulas azuis (estilo ConLicitação) */
+    .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
+        border-radius:6px !important; font-weight:600 !important; font-size:0.82rem !important;
+        background:#2563EB !important; border:1px solid #2563EB !important;
+    }
+    .stButton button *, [data-testid="stButton"] button * { color:#fff !important; }
+    .stButton button:hover, [data-testid="stButton"] button:hover { background:#1D4ED8 !important; border-color:#1D4ED8 !important; }
+    .stDownloadButton button, [data-testid="stDownloadButton"] button {
+        background:#15A24A !important; border:1px solid #15A24A !important; border-radius:6px !important; font-weight:600 !important;
+    }
+    .stDownloadButton button * { color:#fff !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1235,19 +1272,24 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         itens_enc = str(d.get("itens_encontrados") or "").strip()
         keyword_trig = str(d.get("keyword_trigger") or "").strip()
 
-        # Estado "lido" e "favorito"
+        # Estado "lido" e "favorito" — ícones no cabeçalho (estilo ConLicitação)
         num_controle = str(d.get("numero_controle_pncp") or "")
         ja_lido = num_controle in _lidos_set()
         ja_fav = num_controle in _favs_set()
         card_extra_class = "cl-edital-card-lido" if ja_lido else ""
-        lido_badge_html = '<span class="cl-lido-badge">✓ LIDO</span>' if ja_lido else ""
-        fav_badge_html = '<span class="cl-fav-badge">★</span>' if ja_fav else ""
+        icones_hdr_html = (
+            f'<span class="cl-hdr-icon {"on-fav" if ja_fav else ""}" title="Favorita">★</span>'
+            f'<span class="cl-hdr-icon {"on-lido" if ja_lido else ""}" title="Lida">👁</span>'
+        )
 
-        # Rótulo da plataforma de origem (ex.: "[LICITANET]", igual ConLicitação)
+        # Plataforma de origem: tag no objeto + chip na meta (igual ConLicitação)
         origem_plat = str(d.get("origem_plataforma") or "").strip()
+        fonte_val = str(d.get("fonte") or "PNCP").strip()
+        plataforma_label = origem_plat or fonte_val or "PNCP"
         origem_tag_html = (
             f'<span class="cl-origem-tag">[{origem_plat}]</span> ' if origem_plat else ""
         )
+        src_chip_html = f'<span class="cl-src-chip">{plataforma_label}</span>'
 
         # Score de confiança
         try:
@@ -1297,12 +1339,12 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         html = (
             f'<div class="cl-edital-card {card_extra_class}">'
             f'<div class="cl-edital-header">'
-            f'<div style="display:flex;align-items:center;gap:0.5rem;">'
+            f'<div class="cl-hdr-left">'
             f'<div class="cl-edital-num">{idx}</div>'
-            f'{tag_score_html}'
+            f'{icones_hdr_html}'
             f'</div>'
-            f'<div style="display:flex;align-items:center;gap:0.5rem;">'
-            f'{fav_badge_html}{tag_urgente_html}{lido_badge_html}'
+            f'<div class="cl-hdr-right">'
+            f'{tag_urgente_html}{tag_score_html}'
             f'</div>'
             f'</div>'
             f'<div class="cl-edital-body">'
@@ -1310,24 +1352,45 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'{kw_html}'
             f'{item_enc_html}'
             f'<div class="cl-edital-meta">'
-            f'<div><b>Datas:</b> Documento: {data_ab}</div>'
-            f'<div><b>Órgão:</b> <span style="color:#1E40AF;">{orgao}</span></div>'
+            f'<div><b>Abertura:</b> {data_ab}</div>'
+            f'<div><b>Órgão:</b> <span class="cl-orgao">{orgao}</span></div>'
             f'<div><b>Cidade:</b> 📍 {cidade}</div>'
             f'<div><b>Edital:</b> {num_edital}{modal_suffix}</div>'
-            f'<div><b>Valor:</b> <span style="color:var(--cl-primary);font-weight:700;">{valor}</span> · '
+            f'<div><b>Valor estimado:</b> <span class="cl-valor">{valor}</span></div>'
+            f'<div><b>Origem:</b> {src_chip_html} · '
             f'<span class="cl-tag {tag_material_class}">{material}</span> '
-            f'<span class="cl-tag" style="background:#F3F4F6;color:#1F2937;">{dist_str} de {filial}</span> '
-            f'{fonte_badge_html}'
+            f'<span class="cl-tag" style="background:#F3F4F6;color:#1F2937;">{dist_str} · {filial}</span>'
             f'</div>'
             f'</div>'
             f'</div>'
             f'<div class="cl-edital-actions">'
-            f'<div class="cl-edital-actions-label">Ações:</div>'
+            f'<span class="cl-edital-actions-label">Ações:</span>'
             f'{botoes_html}'
             f'</div>'
             f'</div>'
         )
         st.markdown(html, unsafe_allow_html=True)
+
+        # ----- Ver mais informações (estilo ConLicitação) -----
+        with st.expander("🔎 Ver mais informações da licitação"):
+            _enc = _fmt_data(d.get("data_encerramento"))
+            st.markdown(f"**Objeto completo:** {objeto}")
+            cm1, cm2 = st.columns(2)
+            cm1.markdown(f"**Abertura das propostas:** {data_ab}")
+            cm2.markdown(f"**Encerramento:** {_enc or '—'}")
+            cm1.markdown(f"**Modalidade:** {modalidade or '—'}")
+            cm2.markdown(f"**Confiança:** {d.get('score_label') or '—'}")
+            if keyword_trig:
+                st.markdown(f"**Palavra-chave que casou:** _{keyword_trig}_")
+            if itens_enc:
+                st.markdown(f"**Item encontrado no edital:** {itens_enc[:300]}")
+            _links = []
+            if link_origem:
+                _links.append(f"[📥 Baixar edital (origem)]({link_origem})")
+            if link_pncp:
+                _links.append(f"[🔍 Ver no PNCP]({link_pncp})")
+            if _links:
+                st.markdown(" · ".join(_links))
 
         # ----- Botões Streamlit (interativos) -----
         bcol1, bcol2, bcol3 = st.columns(3)
