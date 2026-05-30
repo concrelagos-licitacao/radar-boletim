@@ -1453,10 +1453,12 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
     """
     remetente = os.getenv("NOTIFICACAO_EMAIL_DE", "").strip()
     senha = os.getenv("NOTIFICACAO_EMAIL_SENHA", "").strip()
-    destinatarios_raw = os.getenv("NOTIFICACAO_EMAIL_PARA", "").strip()
+    # Destino padrão: caixa oficial das licitações (sobrescreve via NOTIFICACAO_EMAIL_PARA).
+    destinatarios_raw = os.getenv("NOTIFICACAO_EMAIL_PARA", "licitacao.concrelagos@gmail.com").strip()
 
-    if not (remetente and senha and destinatarios_raw):
-        logging.info("Notificação por e-mail desativada (variáveis NOTIFICACAO_EMAIL_* não configuradas).")
+    # Só remetente + senha (App Password) precisam ser configurados; o destino já tem padrão.
+    if not (remetente and senha):
+        logging.info("Notificação por e-mail desativada (faltam NOTIFICACAO_EMAIL_DE/SENHA).")
         return
     if not novos:
         return
