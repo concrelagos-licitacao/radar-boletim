@@ -54,14 +54,17 @@ except ImportError:
     pass
 
 ROOT = Path(__file__).resolve().parent
+LOGO_PATH = ROOT / "assets" / "logo.png"
 
 # ===== Styling corporativo =====
 st.markdown(
     """
     <style>
     :root {
-        --cl-primary: #0E2A47;
-        --cl-accent:  #C5A572;
+        --cl-primary: #3A4149;   /* grafite do logo Concrelagos */
+        --cl-header:  #2E353D;    /* faixa escura (cabeçalho/login) */
+        --cl-accent:  #C28E2C;    /* dourado/ocre do sol */
+        --cl-accent-d:#A9781F;    /* dourado escuro (hover/valor) */
         --cl-bg:      #F7F8FA;
         --cl-card:    #FFFFFF;
         --cl-text:    #1F2937;
@@ -70,10 +73,13 @@ st.markdown(
         --cl-danger:  #DC2626;
     }
     .main { background-color: var(--cl-bg); }
-    .stApp header { background-color: var(--cl-primary); }
+    .stApp header { background-color: var(--cl-header); }
     .stApp header * { color: white !important; }
-    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-    h1, h2, h3 { color: var(--cl-primary); font-weight: 600; }
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+    /* Títulos serifados (identidade Portfólio) */
+    h1, h2, h3 { color: var(--cl-primary); font-weight: 700;
+        font-family: Georgia, 'Times New Roman', serif; }
+    .cl-serif { font-family: Georgia, 'Times New Roman', serif; }
     .cl-card {
         background: var(--cl-card);
         border: 1px solid #E5E7EB;
@@ -91,10 +97,11 @@ st.markdown(
         letter-spacing: 0.04em;
     }
     .cl-card-value {
-        font-size: 1.65rem;
+        font-size: 1.7rem;
         font-weight: 700;
-        color: var(--cl-primary);
+        color: var(--cl-accent-d);
         line-height: 1.1;
+        font-family: Georgia, 'Times New Roman', serif;
     }
     .cl-card-delta {
         font-size: 0.82rem;
@@ -208,7 +215,7 @@ st.markdown(
         color: white !important;
     }
     .cl-btn-secondary {
-        background: #0E2A47;
+        background: #3A4149;
         color: white !important;
     }
     .cl-tag {
@@ -254,18 +261,18 @@ st.markdown(
         letter-spacing: 0.04em;
     }
     /* Badges de origem da licitação */
-    .cl-fonte-pncp       { background:#EFF6FF;color:#1D4ED8;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
+    .cl-fonte-pncp       { background:#EFF6FF;color:#2E353D;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     .cl-fonte-comprasnet { background:#FFF7ED;color:#C2410C;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     .cl-fonte-bll        { background:#F5F3FF;color:#6D28D9;font-size:0.62rem;font-weight:700;padding:0.12rem 0.4rem;border-radius:3px;letter-spacing:0.03em; }
     /* Boletim (modelo ConLicitação) */
     .cl-boletim-dia {
-        background: linear-gradient(90deg,#0E2A47,#1E3A5F); color:#fff;
+        background: linear-gradient(90deg,#3A4149,#1E3A5F); color:#fff;
         font-weight:700; font-size:0.95rem; padding:0.5rem 0.9rem;
         border-radius:6px; margin:1.2rem 0 0.6rem 0;
     }
     .cl-fav-badge { color:#F59E0B; font-size:1rem; font-weight:700; }
     .cl-origem-tag {
-        background:#ECFDF5; color:#047857; font-size:0.7rem; font-weight:700;
+        background:#FBF3E3; color:#8A6A1E; font-size:0.7rem; font-weight:700;
         padding:0.1rem 0.4rem; border-radius:3px;
     }
 
@@ -276,50 +283,51 @@ st.markdown(
     .cl-edital-header { background:#2D323B !important; padding:0.5rem 0.9rem !important; }
     .cl-hdr-left { display:flex; align-items:center; gap:0.45rem; }
     .cl-hdr-right { display:flex; align-items:center; gap:0.45rem; }
-    .cl-edital-num { background:#15A24A !important; color:#fff !important; min-width:26px !important; height:26px !important; width:auto !important; padding:0 0.45rem; border-radius:13px !important; font-size:0.82rem; }
+    .cl-edital-num { background:#C28E2C !important; color:#fff !important; min-width:26px !important; height:26px !important; width:auto !important; padding:0 0.45rem; border-radius:13px !important; font-size:0.82rem; }
     .cl-hdr-icon { width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,0.16); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.82rem; }
     .cl-hdr-icon.on-fav  { background:#F59E0B; color:#fff; }
-    .cl-hdr-icon.on-lido { background:#15A24A; color:#fff; }
+    .cl-hdr-icon.on-lido { background:#C28E2C; color:#fff; }
     .cl-edital-body { padding:0.9rem 1.1rem !important; }
     .cl-edital-objeto { color:#111827 !important; font-size:0.95rem; }
     .cl-edital-meta { gap:0.45rem 1.6rem !important; font-size:0.87rem !important; color:#374151 !important; }
     .cl-edital-meta b { color:#9CA3AF !important; font-weight:600 !important; }
-    .cl-valor { color:#E8730C; font-weight:800; font-size:1.05rem; }
-    .cl-orgao { color:#2563EB; font-weight:600; }
+    .cl-valor { color:#A9781F; font-weight:800; font-size:1.05rem; }
+    .cl-orgao { color:#3A4149; font-weight:600; }
     .cl-src-chip { display:inline-block; border:1px solid #D1D5DB; border-radius:6px; padding:0.08rem 0.5rem; font-size:0.7rem; font-weight:700; color:#374151; background:#F9FAFB; }
-    .cl-origem-tag { background:#E7F8EF !important; color:#0F7A3D !important; padding:0.1rem 0.45rem !important; border-radius:4px !important; }
+    .cl-origem-tag { background:#FBF3E3 !important; color:#8A6A1E !important; padding:0.1rem 0.45rem !important; border-radius:4px !important; }
     .cl-edital-actions { background:#F8FAFC !important; border-top:1px solid #EDF0F3 !important; padding:0.7rem 1.1rem !important; }
     .cl-edital-actions-label { font-weight:600 !important; }
-    .cl-btn-primary  { background:#2563EB !important; color:#fff !important; }
-    .cl-btn-secondary{ background:#fff !important; color:#2563EB !important; border:1px solid #2563EB !important; }
-    .cl-boletim-dia { background:#EAF7F0 !important; color:#0F7A3D !important; border-left:4px solid #15A24A; border-radius:6px; }
-    .cl-header-bar { background:linear-gradient(90deg,#0E2A47 0%, #15A24A 160%) !important; border-radius:10px; }
-    .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #15A24A; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
-    .cl-boletim-head-title { font-size:1.4rem; font-weight:800; color:#0E2A47; }
+    .cl-btn-primary  { background:#3A4149 !important; color:#fff !important; }
+    .cl-btn-secondary{ background:#fff !important; color:#3A4149 !important; border:1px solid #3A4149 !important; }
+    .cl-boletim-dia { background:#FBF3E3 !important; color:#8A6A1E !important; border-left:4px solid #C28E2C; border-radius:6px; }
+    .cl-header-bar { background:var(--cl-header) !important; border-radius:0 !important; border-bottom:3px solid var(--cl-accent) !important; margin-top:0 !important; }
+    .cl-header-title { font-family:Georgia,'Times New Roman',serif; letter-spacing:0.01em; }
+    .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #C28E2C; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
+    .cl-boletim-head-title { font-size:1.4rem; font-weight:800; color:#3A4149; font-family:Georgia,'Times New Roman',serif; }
     .cl-boletim-head-sub { font-size:0.84rem; color:#6B7280; }
     /* Botões interativos do Streamlit como pílulas azuis pequenas (estilo ConLicitação) */
     .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
         border-radius:6px !important; font-weight:600 !important; font-size:0.78rem !important;
         padding:0.28rem 0.7rem !important; min-height:0 !important;
-        background:#2563EB !important; border:1px solid #2563EB !important;
+        background:#3A4149 !important; border:1px solid #3A4149 !important;
     }
     .stButton button *, [data-testid="stButton"] button * { color:#fff !important; }
-    .stButton button:hover, [data-testid="stButton"] button:hover { background:#1D4ED8 !important; border-color:#1D4ED8 !important; }
+    .stButton button:hover, [data-testid="stButton"] button:hover { background:#2E353D !important; border-color:#2E353D !important; }
     .stDownloadButton button, [data-testid="stDownloadButton"] button {
-        background:#15A24A !important; border:1px solid #15A24A !important; border-radius:6px !important;
+        background:#C28E2C !important; border:1px solid #C28E2C !important; border-radius:6px !important;
         font-weight:600 !important; font-size:0.78rem !important; padding:0.28rem 0.7rem !important;
     }
     .stDownloadButton button * { color:#fff !important; }
     /* Gatilho do popover "Mais filtros" — discreto, contorno azul */
-    [data-testid="stPopover"] button { background:#fff !important; border:1px solid #2563EB !important; }
-    [data-testid="stPopover"] button * { color:#2563EB !important; }
+    [data-testid="stPopover"] button { background:#fff !important; border:1px solid #3A4149 !important; }
+    [data-testid="stPopover"] button * { color:#3A4149 !important; }
     /* Total de licitações */
     .cl-total { color:#374151; font-size:0.95rem; padding-top:0.4rem; }
     /* Ritmo: cards juntos, ações coladas, expander compacto */
     .cl-edital-card { margin-bottom:0.35rem !important; }
     .cl-edital-actions { padding:0.5rem 1.1rem !important; }
     [data-testid="stExpander"] { border:none !important; margin:0.1rem 0 0.15rem 0 !important; }
-    [data-testid="stExpander"] summary { font-size:0.83rem !important; color:#2563EB !important; }
+    [data-testid="stExpander"] summary { font-size:0.83rem !important; color:#3A4149 !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -340,11 +348,16 @@ def _check_login() -> bool:
     if not senha_correta:
         senha_correta = "concrelagos2026"  # fallback dev
 
+    if LOGO_PATH.exists():
+        lc1, lc2, lc3 = st.columns([2, 3, 2])
+        with lc2:
+            st.image(str(LOGO_PATH), width='stretch')
+
     st.markdown(
         """
-        <div class="cl-header-bar">
+        <div class="cl-header-bar" style="justify-content:center;text-align:center;">
             <div>
-                <div class="cl-header-title">🏗️ Concrelagos Intelligence Hub</div>
+                <div class="cl-header-title">Concrelagos Intelligence Hub</div>
                 <div class="cl-header-sub">Rastreador autônomo de licitações públicas — acesso restrito</div>
             </div>
         </div>
@@ -352,9 +365,17 @@ def _check_login() -> bool:
         unsafe_allow_html=True,
     )
 
-    with st.form("login"):
-        senha = st.text_input("Senha de acesso", type="password", placeholder="Informe a senha")
-        ok = st.form_submit_button("Entrar", type="primary", width='stretch')
+    fc1, fc2, fc3 = st.columns([1, 1.5, 1])
+    with fc2:
+        with st.form("login"):
+            st.markdown(
+                "<div class='cl-serif' style='font-size:1.15rem;font-weight:700;"
+                "color:#3A4149;margin-bottom:0.1rem;'>Acesso ao Sistema</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption("Sistema restrito — acesso autorizado apenas")
+            senha = st.text_input("Senha de acesso", type="password", placeholder="Informe a senha")
+            ok = st.form_submit_button("Entrar", type="primary", width='stretch')
     if ok:
         if senha == senha_correta:
             st.session_state["autenticado"] = True
@@ -1365,8 +1386,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                                'background:#FFF7ED;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #EA580C;">'
                                '📍 <b>Local da obra:</b> a confirmar (órgão estadual/federal — verifique no edital/IA)</div>')
         elif _local_obra:
-            local_obra_html = (f'<div style="font-size:0.8rem;color:#0F7A3D;margin-top:0.3rem;'
-                               f'background:#ECFDF5;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #16A34A;">'
+            local_obra_html = (f'<div style="font-size:0.8rem;color:#8A6A1E;margin-top:0.3rem;'
+                               f'background:#FBF3E3;padding:0.3rem 0.6rem;border-radius:4px;border-left:3px solid #16A34A;">'
                                f'📍 <b>Local da obra:</b> {_local_obra} (≠ sede do órgão)</div>')
         else:
             local_obra_html = ""
@@ -1639,11 +1660,14 @@ def main() -> None:
         ultima_str = ultima.strftime("%d/%m/%Y %H:%M") if ultima else "—"
         sub_exec = ""
 
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=240)
+
     st.markdown(
         f"""
         <div class="cl-header-bar">
             <div>
-                <div class="cl-header-title">🏗️ Concrelagos Intelligence Hub</div>
+                <div class="cl-header-title">Concrelagos Intelligence Hub</div>
                 <div class="cl-header-sub">Rastreador autônomo de licitações públicas — PNCP</div>
             </div>
             <div style="text-align:right;">
