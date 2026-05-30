@@ -176,6 +176,7 @@ PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 PNCP_TAMANHO_PAGINA = 50    # menor que 500 para evitar timeouts
 PNCP_TIMEOUT_S = int(os.getenv("PNCP_TIMEOUT_S", "60"))
 PNCP_RETRY_COUNT = int(os.getenv("PNCP_RETRY_COUNT", "1"))   # cada página = 1 + retry
+PNCP_PAUSA_S = float(os.getenv("PNCP_PAUSA_S", "0.8"))       # pausa entre requisições (evita throttling)
 PNCP_MAX_PAGINAS = int(os.getenv("PNCP_MAX_PAGINAS", "5"))    # 5 páginas/modalidade na demo
 # Códigos de modalidade conforme tabela de domínio do PNCP — varremos pregão,
 # concorrência, dispensa, inexigibilidade e leilão, que cobrem o universo
@@ -433,7 +434,9 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
     coletados: list[dict] = []
 
     contagem_por_modalidade: dict[int, int] = {}
-    for modalidade in PNCP_MODALIDADES:
+    for i_mod, modalidade in enumerate(PNCP_MODALIDADES):
+        if i_mod > 0:
+            time.sleep(PNCP_PAUSA_S)  # pausa entre modalidades evita throttling do PNCP
         pagina = 1
         total_modalidade = 0
         while True:
@@ -468,6 +471,7 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
                              PNCP_MAX_PAGINAS, modalidade)
                 break
             pagina += 1
+            time.sleep(PNCP_PAUSA_S)  # pausa entre páginas evita throttling
         contagem_por_modalidade[modalidade] = total_modalidade
 
     logging.info("PNCP retornou %d editais (bruto) na janela %s a %s. Por modalidade: %s",
@@ -478,34 +482,54 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
 
 
 def _pncp_get_com_retry(params: dict, modalidade: int, pagina: int) -> dict | None:
-    """GET no PNCP com retry exponencial. Retorna payload JSON ou None se falhar."""
-    for tentativa in range(PNCP_RETRY_COUNT + 1):
+    """GET no PNCP com retry exponencial. Retorna payload JSON ou None se falhar.
+
+    Importante: o PNCP costuma responder com CORPO VAZIO (que vira
+    'Expecting value: line 1 column 1') quando recebe requisições rápidas demais
+    (throttling). Tratamos corpo vazio como ERRO TRANSITÓRIO e tentamos de novo
+    com backoff maior — senão modalidades inteiras (Dispensa, Concorrência…) somem.
+    """
+    # Mais paciência para vencer throttling (mínimo 3 tentativas)
+    max_tent = max(PNCP_RETRY_COUNT, 3)
+    for tentativa in range(max_tent + 1):
+        transitorio = False
         try:
             resp = requests.get(PNCP_BASE_URL, params=params, timeout=PNCP_TIMEOUT_S)
             if resp.status_code == 204:  # No Content
                 return {"data": [], "totalPaginas": 0}
             resp.raise_for_status()
-            return resp.json()
+            corpo = resp.text.strip()
+            if not corpo:
+                # Corpo vazio = quase sempre throttling → vale a pena tentar de novo
+                transitorio = True
+                logging.warning("PNCP corpo vazio (modalidade=%s pagina=%s tentativa=%s/%s) — provável throttling.",
+                                modalidade, pagina, tentativa + 1, max_tent + 1)
+            else:
+                return resp.json()
         except requests.Timeout:
+            transitorio = True
             logging.warning("PNCP timeout (modalidade=%s pagina=%s tentativa=%s/%s)",
-                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1)
+                            modalidade, pagina, tentativa + 1, max_tent + 1)
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 422:
-                # 422 = Unprocessable: parâmetros inválidos para essa modalidade nessa janela
                 logging.info("PNCP modalidade %s sem dados na janela (HTTP 422).", modalidade)
                 return None
             logging.warning("PNCP HTTP erro (modalidade=%s pagina=%s tentativa=%s/%s): %s",
-                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1, e)
-            if e.response is not None and e.response.status_code < 500:
-                return None  # 4xx: não vale a pena retry
-        except requests.RequestException as e:
-            logging.warning("PNCP erro de rede (modalidade=%s pagina=%s tentativa=%s/%s): %s",
-                            modalidade, pagina, tentativa + 1, PNCP_RETRY_COUNT + 1, e)
+                            modalidade, pagina, tentativa + 1, max_tent + 1, e)
+            if e.response is not None and e.response.status_code < 500 and e.response.status_code != 429:
+                return None  # 4xx (exceto 429) não vale retry
+            transitorio = True
         except ValueError as e:
-            logging.warning("PNCP JSON inválido (modalidade=%s pagina=%s): %s", modalidade, pagina, e)
-            return None
-        if tentativa < PNCP_RETRY_COUNT:
-            time.sleep(2 ** tentativa)  # backoff: 1s, 2s
+            # JSONDecodeError (corpo inválido/vazio) → trata como transitório (throttling)
+            transitorio = True
+            logging.warning("PNCP corpo não-JSON (modalidade=%s pagina=%s tentativa=%s/%s): %s",
+                            modalidade, pagina, tentativa + 1, max_tent + 1, e)
+        except requests.RequestException as e:
+            transitorio = True
+            logging.warning("PNCP erro de rede (modalidade=%s pagina=%s tentativa=%s/%s): %s",
+                            modalidade, pagina, tentativa + 1, max_tent + 1, e)
+        if transitorio and tentativa < max_tent:
+            time.sleep(1.5 * (tentativa + 1))  # backoff crescente: 1.5s, 3s, 4.5s…
     return None
 
 
@@ -1429,7 +1453,7 @@ def main() -> None:
         # Consolida e deduplica — PNCP tem precedência
         brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll)
         logging.info(
-            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d → deduplicado=%d editais brutos",
+            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d -> deduplicado=%d editais brutos",
             len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos),
         )
 
@@ -1445,7 +1469,7 @@ def main() -> None:
 
     # Log do funil completo — mostra onde os editais são descartados
     logging.info(
-        "FUNIL: brutos=%d → keyword=%d → geo=%d → novos=%d | tempo=%.1fs",
+        "FUNIL: brutos=%d -> keyword=%d -> geo=%d -> novos=%d | tempo=%.1fs",
         len(brutos), len(pre), len(qualificados), len(novos), tempo_s,
     )
     if len(brutos) > 0 and len(pre) == 0:
