@@ -591,8 +591,74 @@ def _salvar_resumo_cache(num_controle: str, resumo: dict) -> None:
         st.warning(f"Não foi possível salvar o resumo no cache: {exc}")
 
 
+def _baixar_texto_edital(num_controle: str, link_pdf: str, link_pncp: str) -> str:
+    """Obtém o TEXTO do edital, priorizando o PDF real via API de arquivos do PNCP.
+
+    Ordem de tentativa:
+      1. API de arquivos do PNCP (a partir do numeroControlePNCP) → PDF de verdade.
+      2. link_pdf (link_sistema_origem) — pode ser PDF direto.
+      3. link_pncp — geralmente página HTML do portal (fallback).
+    PDFs são lidos com pdfplumber; HTML tem as tags removidas antes de ir à IA.
+    Retorna "" se nada utilizável for obtido.
+    """
+    import io, re
+    import requests
+    import pdfplumber
+
+    HDRS = {"User-Agent": "Mozilla/5.0 (compatible; ConcrelagosBot/1.0)"}
+    urls: list[str] = []
+
+    # 1) API de arquivos do PNCP — numeroControlePNCP no formato "{cnpj}-{tipo}-{seq}/{ano}"
+    try:
+        nc = (num_controle or "").strip()
+        if "/" in nc and "-" in nc:
+            esquerda, ano = nc.split("/", 1)
+            partes = esquerda.split("-")
+            cnpj, seq = partes[0], partes[-1]
+            seq_int = str(int(seq))  # remove zeros à esquerda
+            api = (f"https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}"
+                   f"/compras/{ano}/{seq_int}/arquivos")
+            r = requests.get(api, timeout=30, headers=HDRS)
+            if r.status_code == 200:
+                for arq in (r.json() or []):
+                    u = arq.get("url") or arq.get("uri") or arq.get("link")
+                    if u:
+                        urls.append(u)
+    except Exception:
+        pass
+
+    # 2) e 3) fallbacks
+    if link_pdf:
+        urls.append(link_pdf)
+    if link_pncp:
+        urls.append(link_pncp)
+
+    for u in urls:
+        try:
+            resp = requests.get(u, timeout=30, allow_redirects=True, headers=HDRS)
+            resp.raise_for_status()
+            ct = resp.headers.get("content-type", "").lower()
+            eh_pdf = ("pdf" in ct) or resp.content[:5].startswith(b"%PDF") or u.lower().endswith(".pdf")
+            if eh_pdf:
+                with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                    txt = "\n".join((p.extract_text() or "") for p in pdf.pages[:20]).strip()
+                if len(txt) >= 100:
+                    return txt
+            else:
+                # HTML → remove scripts/estilos/tags e normaliza espaços
+                html = resp.text
+                html = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+                txt = re.sub(r"<[^>]+>", " ", html)
+                txt = re.sub(r"\s+", " ", txt).strip()
+                if len(txt) >= 200:
+                    return txt[:12000]
+        except Exception:
+            continue
+    return ""
+
+
 def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | None:
-    """Baixa o PDF do edital e gera um resumo estruturado via Claude.
+    """Baixa o PDF do edital e gera um resumo estruturado via Gemini.
 
     Retorna dict com: produto_exato, quantidade, prazo_entrega, local_entrega,
     exigencias_tecnicas (list), recomendacao, justificativa.
@@ -613,35 +679,18 @@ def _resumir_edital(num_controle: str, link_pdf: str, link_pncp: str) -> dict | 
         st.error("GEMINI_API_KEY não configurada. Obtenha grátis em aistudio.google.com/app/apikey e configure em Streamlit → Settings → Secrets → [gemini] api_key.")
         return None
 
-    # 3) Tenta baixar o PDF
-    url = link_pdf or link_pncp
-    if not url:
+    # 3) Obtém o texto do edital (PDF real via API de arquivos do PNCP; fallback p/ links)
+    if not (link_pdf or link_pncp or num_controle):
         st.warning("Sem link disponível para baixar o edital.")
         return None
 
-    texto_edital = ""
-    try:
-        import pdfplumber, io
-        resp = __import__("requests").get(url, timeout=30, allow_redirects=True,
-                                          headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        content_type = resp.headers.get("content-type", "")
-        if "pdf" in content_type or url.lower().endswith(".pdf"):
-            with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-                pages_text = [p.extract_text() or "" for p in pdf.pages[:20]]
-            texto_edital = "\n".join(pages_text).strip()
-        else:
-            # Não é PDF — usa o HTML como texto bruto (limitado)
-            texto_edital = resp.text[:8000]
-    except ImportError:
-        st.error("Instale pdfplumber: `pip install pdfplumber`")
-        return None
-    except Exception as exc:
-        st.warning(f"Não foi possível baixar o edital ({exc}). Tente abrir o link manualmente.")
-        return None
+    texto_edital = _baixar_texto_edital(num_controle, link_pdf, link_pncp)
 
     if not texto_edital or len(texto_edital) < 100:
-        st.warning("PDF sem texto extraível (provavelmente escaneado). Análise IA não disponível.")
+        st.warning(
+            "Não consegui extrair o texto do edital (PDF escaneado ou portal sem download direto). "
+            "Abra o link 'Baixar Edital' manualmente."
+        )
         return None
 
     # 4) Chama Gemini — tenta gemini-1.5-flash primeiro (quota separada),
