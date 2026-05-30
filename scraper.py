@@ -826,17 +826,26 @@ def qualificar_por_distancia(
     usinas = filiais.get("usinas") or []
     pedreiras = filiais.get("pedreiras") or []
 
+    coords_offline = _carregar_coords_offline()
+    falhas_geo = 0
     for ed in editais:
-        chave_geo = f"{_normalize(ed['municipio'])}|{ed['uf']}"
+        mun_norm = _normalize(ed["municipio"])
+        uf = ed["uf"]
+        chave_geo = f"{mun_norm}|{uf}"
 
-        if chave_geo in geocode_cache:
-            origem = geocode_cache[chave_geo]
-        else:
-            origem = _geocodificar_municipio(geocoder, ed["municipio"], ed["uf"])
-            geocode_cache[chave_geo] = origem
+        # 1º) base OFFLINE de municípios (instantânea, sem falha de rede)
+        origem = coords_offline.get((mun_norm, uf))
+        # 2º) fallback Nominatim (só quando o município não está na base)
+        if origem is None:
+            if chave_geo in geocode_cache:
+                origem = geocode_cache[chave_geo]
+            else:
+                origem = _geocodificar_municipio(geocoder, ed["municipio"], ed["uf"])
+                geocode_cache[chave_geo] = origem
 
         if origem is None:
-            logging.warning("Geocode não retornou coordenada para %s/%s — edital descartado.",
+            falhas_geo += 1
+            logging.warning("Sem coordenada para %s/%s (offline+Nominatim) — edital descartado.",
                             ed["municipio"], ed["uf"])
             continue
 
@@ -870,8 +879,41 @@ def qualificar_por_distancia(
 
         # Fora dos raios — descartado da memória.
 
-    logging.info("%d editais qualificados após filtro geográfico.", len(qualificados))
+    logging.info("%d editais qualificados após filtro geográfico (%d sem coordenada).",
+                 len(qualificados), falhas_geo)
     return qualificados
+
+
+_COORDS_OFFLINE: dict[tuple[str, str], tuple[float, float]] | None = None
+
+
+def _carregar_coords_offline() -> dict[tuple[str, str], tuple[float, float]]:
+    """Carrega coordenadas dos municípios brasileiros de dados/municipios_coords.csv.
+
+    Base estática (IBGE, ~5.570 municípios) → geocoding instantâneo e SEM falha de
+    rede. Evita que editais perto sejam descartados por erro/limite do Nominatim
+    (Nominatim vira só fallback para nomes que não estiverem na base).
+    Chave: (municipio_normalizado, UF). Cache em memória após a 1ª carga.
+    """
+    global _COORDS_OFFLINE
+    if _COORDS_OFFLINE is not None:
+        return _COORDS_OFFLINE
+    coords: dict[tuple[str, str], tuple[float, float]] = {}
+    arq = PROJECT_ROOT / "dados" / "municipios_coords.csv"
+    try:
+        with arq.open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    coords[(row["municipio_norm"], row["uf"])] = (
+                        float(row["lat"]), float(row["lng"])
+                    )
+                except (ValueError, KeyError):
+                    continue
+        logging.info("Coordenadas offline carregadas: %d municípios.", len(coords))
+    except FileNotFoundError:
+        logging.warning("dados/municipios_coords.csv não encontrado — usando só Nominatim.")
+    _COORDS_OFFLINE = coords
+    return coords
 
 
 def _geocodificar_municipio(geocoder: Nominatim, municipio: str, uf: str) -> tuple[float, float] | None:
