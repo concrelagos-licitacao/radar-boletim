@@ -47,8 +47,10 @@ load_dotenv()
 # =========================================================================
 # REGRAS DE NEGÓCIO
 # =========================================================================
-VALOR_MINIMO_GERAL    = float(os.getenv("VALOR_MINIMO_GERAL",    "50000"))
-VALOR_MINIMO_PEDREIRA = float(os.getenv("VALOR_MINIMO_PEDREIRA", "80000"))
+# Captura SEM corte de valor (default 0). O filtro de valor é feito na TELA (app.py),
+# para nunca jogar fora uma licitação na coleta. Ajustável por env var se necessário.
+VALOR_MINIMO_GERAL    = float(os.getenv("VALOR_MINIMO_GERAL",    "0"))
+VALOR_MINIMO_PEDREIRA = float(os.getenv("VALOR_MINIMO_PEDREIRA", "0"))
 RAIO_USINA_KM = 70
 RAIO_PEDREIRA_KM = 700
 
@@ -64,54 +66,102 @@ ESTADOS_BRITA    = {"RJ"}  # brita somente no Rio de Janeiro
 # Score 1 — POSSÍVEL: edital genérico ("materiais de construção") — pode ou não
 #            conter concreto usinado; editais deste grupo passam pelo enriquecimento
 #            por itens (se PNCP_BUSCAR_ITENS=true) para promoção a score=2.
+# ⚠️ REGRA DE OURO: a Concrelagos vende SÓ DOIS PRODUTOS — concreto USINADO e BRITA.
+# Cimento ensacado, postes/tubos/blocos/manilhas/artefatos pré-moldados, piso
+# intertravado, meio-fio e pavimentação asfáltica NÃO são nossos — devem ser
+# DESCARTADOS mesmo contendo a palavra "concreto" (ver KEYWORDS_EXCLUSAO).
+#
+# CONCRETO USINADO (concreto fresco entregue por caminhão-betoneira da usina).
 KEYWORDS_CONCRETO: dict[int, tuple[str, ...]] = {
-    3: (
+    3: (  # CERTO — termos que só existem em concreto usinado
         "concreto usinado",
         "concreto pre-misturado",
         "concreto pre misturado",
+        "concreto pre-fabricado fck",   # raro, mas usinado
         "concreto dosado",
         "concreto dosado em central",
+        "central dosadora",
         "concreto preparado",
         "concreto comercializado",
         "fornecimento de concreto",
-        "concreto bombeado",        # muito comum em obras de médio porte
-        "concreto fck",             # spec técnica explícita (ex: concreto fck 25 MPa)
-    ),
-    2: (
-        "concreto",                 # "aquisição de concreto", "fornecimento de concreto" genérico
-        "concreto armado",
-        "concretagem",
+        "concreto bombeado",
+        "concreto bombeavel",
+        "concreto usinado bombeado",
+        "concreto fck",                 # spec técnica (ex: concreto fck 25 MPa)
         "concreto estrutural",
-        "concreto para pavimentacao",
-        "concreto magro",
+        "concreto convencional",
+        "concreto betonado",
     ),
-    1: (
-        "materiais de construcao",   # cobre "materiais de construção" sem acento
+    2: (  # PROVÁVEL — "concreto" genérico; só conta com contexto de usinado (ver filtro)
+        "concreto",
+        "concretagem",
+        "concreto armado",
+    ),
+    1: (  # POSSÍVEL — genérico; passa pelo enriquecimento por itens
+        "materiais de construcao",
         "material de construcao",
     ),
 }
-# Brita: agregados de qualquer tipo, pedras, pedriscos.
+# BRITA e todas as variações/disfarces de nome (agregado graúdo de pedra britada).
 KEYWORDS_BRITA: dict[int, tuple[str, ...]] = {
-    3: (
+    3: (  # CERTO
         "brita",
-        "pedrisco",
+        "britas",
+        "brita graduada",
+        "brita graduada simples",
+        "bgs",
+        "brita 0",
+        "brita 1",
+        "brita 2",
+        "brita 3",
+        "brita 4",
+        "brita corrida",
         "pedra britada",
         "pedras britadas",
-        "rachao",               # "rachão" sem acento (pedra de mão)
+        "pedrisco",
+        "po de pedra",
+        "bica corrida",
+        "rachao",                # "rachão" sem acento
+        "racho",
         "pedregulho",
         "cascalho",
-    ),
-    2: (
-        "agregado graudo",      # cobre "agregado graúdo" normalizado
+        "agregado graudo",
         "agregados graudos",
-        "agregado",             # só score 2 para não capturar "agregado miúdo" (areia)
+        "pedra de mao",
+        "pedra marroada",
+        "seixo",
+    ),
+    2: (  # PROVÁVEL
+        "agregado",              # só score 2 (evita "agregado miúdo" = areia)
         "agregados",
     ),
-    1: (
-        "materiais de construcao",  # pode conter brita — enriquecimento por itens vai confirmar
+    1: (  # POSSÍVEL — genérico
+        "materiais de construcao",
         "material de construcao",
     ),
 }
+
+# 🚫 EXCLUSÕES — produtos VIZINHOS que NÃO são da Concrelagos. Se o objeto contém
+# um destes termos e NÃO tem sinal forte (score 3) de usinado/brita, é descartado.
+KEYWORDS_EXCLUSAO: tuple[str, ...] = (
+    "tubo de concreto", "tubos de concreto", "manilha", "aduela",
+    "poste de concreto", "postes de concreto", "poste",
+    "bloco de concreto", "blocos de concreto", "bloco estrutural", "bloquete",
+    "artefato de concreto", "artefatos de concreto",
+    "pre-moldado", "pre moldado", "premoldado",
+    "pre-fabricado", "pre fabricado", "prefabricado",
+    "piso intertravado", "paver", "lajota",
+    "meio-fio", "meio fio", "guia e sarjeta", "sarjeta",
+    "cimento", "cimento portland", "saco de cimento",
+    "argamassa",
+    "pavimentacao asfaltica", "asfalto", "cbuq", "massa asfaltica",
+    "emulsao asfaltica", "concreto asfaltico", "concreto betuminoso",
+)
+# Sinais de contexto que CONFIRMAM concreto usinado (promovem "concreto" genérico).
+CONTEXTO_USINADO: tuple[str, ...] = (
+    "fck", "mpa", "m3", "metro cubico", "metros cubicos", "usina", "usinado",
+    "central", "dosado", "bombeado", "betoneira", "caminhao betoneira", "slump",
+)
 
 SCORE_LABEL = {3: "CERTO", 2: "PROVÁVEL", 1: "POSSÍVEL"}
 
@@ -130,7 +180,9 @@ PNCP_MAX_PAGINAS = int(os.getenv("PNCP_MAX_PAGINAS", "5"))    # 5 páginas/modal
 # Códigos de modalidade conforme tabela de domínio do PNCP — varremos pregão,
 # concorrência, dispensa, inexigibilidade e leilão, que cobrem o universo
 # relevante para insumos de construção.
-PNCP_MODALIDADES = (6, 4, 8, 9, 1, 3)   # 3 = Concorrência Eletrônica (obras de grande porte)
+# 6=Pregão Eletrônico, 5=Pregão Presencial, 4=Concorrência Presencial,
+# 3=Concorrência Eletrônica, 8=Dispensa, 9=Inexigibilidade, 12=Credenciamento, 1=Leilão.
+PNCP_MODALIDADES = (6, 5, 4, 3, 8, 9, 12, 1)
 
 ABA_FILIAIS = "Filiais"
 ABA_OUTPUT = "Novas Licitações"
@@ -177,7 +229,8 @@ OUTPUT_HEADER = [
     "keyword_trigger",        # keyword que disparou o match
     "itens_encontrados",      # item PNCP relevante encontrado (somente para score=1 enriquecido)
     # -- origem do edital (adicionado na Fase 10: multi-fonte) --
-    "fonte",                  # "PNCP", "COMPRASNET", "BLL"
+    "fonte",                  # API consultada: "PNCP", "COMPRASNET", "BLL"…
+    "origem_plataforma",      # plataforma operacional do edital (ex: "LICITANET", "BLL", "ComprasNet")
 ]
 
 # Mapeamento de modalidade PNCP → sigla e nome
@@ -456,6 +509,38 @@ def _pncp_get_com_retry(params: dict, modalidade: int, pagina: int) -> dict | No
     return None
 
 
+def _rotular_origem(link_sistema_origem: str) -> str:
+    """Detecta a plataforma operacional do edital a partir do link de origem.
+
+    Espelha o comportamento do ConLicitação ("[LICITANET]", "BLL"…). Retorna
+    rótulo curto ou "" se desconhecido.
+    """
+    s = (link_sistema_origem or "").lower()
+    if not s:
+        return ""
+    regras = (
+        ("licitanet", "LICITANET"),
+        ("bllcompras", "BLL"),
+        ("bll.org", "BLL"),
+        ("portaldecompraspublicas", "Portal de Compras Públicas"),
+        ("licitardigital", "Licitar Digital"),
+        ("bnc.org", "BNC"),
+        ("bionexo", "Bionexo"),
+        ("comprasnet", "ComprasNet"),
+        ("compras.gov", "Compras.gov.br"),
+        ("comprasgovernamentais", "Compras.gov.br"),
+        ("comprasbr", "ComprasBR"),
+        ("publinexo", "Publinexo"),
+        ("licitacoes-e", "Licitações-e (BB)"),
+        ("bbmnet", "BBMNET"),
+        ("gov.br", "Gov.br"),
+    )
+    for chave, rotulo in regras:
+        if chave in s:
+            return rotulo
+    return ""
+
+
 def _extrair_edital(item: dict) -> dict:
     unidade = item.get("unidadeOrgao") or {}
     orgao = item.get("orgaoEntidade") or {}
@@ -497,6 +582,7 @@ def _extrair_edital(item: dict) -> dict:
         "link_pncp": link_pncp_pagina,
         "link_sistema_origem": item.get("linkSistemaOrigem") or "",
         "fonte": "PNCP",
+        "origem_plataforma": _rotular_origem(item.get("linkSistemaOrigem") or ""),
         # campos internos para enriquecimento por itens (não gravados diretamente)
         "_cnpj": cnpj,
         "_ano_compra": str(ano) if ano else "",
@@ -508,47 +594,80 @@ def _extrair_edital(item: dict) -> dict:
 # FASE 2 — FILTROS DE KEYWORD, ESTADO E VALOR
 # =========================================================================
 def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
-    """Filtra editais por keyword, estado e valor mínimo.
+    """Filtra editais para SÓ concreto usinado e brita (com exclusão de vizinhos).
 
-    Percorre KEYWORDS_CONCRETO e KEYWORDS_BRITA do score mais alto (3) para o mais
-    baixo (1) e para no primeiro match, anotando `score` e `keyword_trigger`.
+    Regras:
+      1. Se o objeto contém termo de EXCLUSÃO (pré-moldado, cimento, asfalto…) e NÃO
+         tem sinal forte (score 3) de usinado/brita → descarta.
+      2. Concreto: score 3 = termos de usinado explícitos; score 2 = "concreto"
+         genérico SÓ se houver CONTEXTO_USINADO (fck, m³, central, bombeado…).
+      3. Brita: score 3 = brita e variações; score 2 = "agregado(s)".
+      4. "materiais de construção" → score 1 (enriquecimento por itens confirma).
+    Valor: NÃO corta aqui (corte é só na tela). Mantido VALOR_MINIMO_GERAL=0.
     """
     sobreviventes: list[dict] = []
+    descartados_exclusao = 0
     for ed in editais:
-        if ed["valor_estimado"] < VALOR_MINIMO_GERAL:
+        if VALOR_MINIMO_GERAL and ed["valor_estimado"] < VALOR_MINIMO_GERAL:
             continue
         objeto_norm = _normalize(ed["objeto"])
         uf = ed["uf"]
 
+        # Sinais fortes (score 3) de cada produto
+        hit_concreto_forte = next((k for k in KEYWORDS_CONCRETO[3] if k in objeto_norm), None)
+        hit_brita_forte = next((k for k in KEYWORDS_BRITA[3] if k in objeto_norm), None)
+        tem_sinal_forte = bool(hit_concreto_forte or hit_brita_forte)
+
+        # Regra 1 — exclusão de produtos vizinhos (postes, tubos, cimento, asfalto…)
+        if not tem_sinal_forte:
+            if any(x in objeto_norm for x in KEYWORDS_EXCLUSAO):
+                descartados_exclusao += 1
+                continue
+
         matched = False
-        # Tenta concreto (score 3→1)
+
+        # Regra 2 — CONCRETO USINADO (só nos estados de concreto)
         if uf in ESTADOS_CONCRETO:
-            for score in (3, 2, 1):
-                hit = next((k for k in KEYWORDS_CONCRETO[score] if k in objeto_norm), None)
-                if hit:
-                    ed["material"] = "concreto"
-                    ed["score"] = score
-                    ed["score_label"] = SCORE_LABEL[score]
-                    ed["keyword_trigger"] = hit
-                    ed.setdefault("itens_encontrados", "")
-                    sobreviventes.append(ed)
-                    matched = True
-                    break
+            hit, score = None, 0
+            if hit_concreto_forte:
+                hit, score = hit_concreto_forte, 3
+            elif any(k in objeto_norm for k in KEYWORDS_CONCRETO[2]):
+                # "concreto" genérico só conta com contexto de usinado
+                if any(c in objeto_norm for c in CONTEXTO_USINADO):
+                    hit = next(k for k in KEYWORDS_CONCRETO[2] if k in objeto_norm)
+                    score = 2
+            elif any(k in objeto_norm for k in KEYWORDS_CONCRETO[1]):
+                hit, score = next(k for k in KEYWORDS_CONCRETO[1] if k in objeto_norm), 1
+            if hit:
+                ed["material"] = "concreto"
+                ed["score"] = score
+                ed["score_label"] = SCORE_LABEL[score]
+                ed["keyword_trigger"] = hit
+                ed.setdefault("itens_encontrados", "")
+                sobreviventes.append(ed)
+                matched = True
 
-        # Tenta brita (score 3→2→1; score=1 passa pelo enriquecimento de itens)
+        # Regra 3 — BRITA (só nos estados de brita = RJ)
         if not matched and uf in ESTADOS_BRITA:
-            for score in (3, 2, 1):
-                hit = next((k for k in KEYWORDS_BRITA[score] if k in objeto_norm), None)
-                if hit:
-                    ed["material"] = "brita"
-                    ed["score"] = score
-                    ed["score_label"] = SCORE_LABEL[score]
-                    ed["keyword_trigger"] = hit
-                    ed.setdefault("itens_encontrados", "")
-                    sobreviventes.append(ed)
-                    break
+            hit, score = None, 0
+            if hit_brita_forte:
+                hit, score = hit_brita_forte, 3
+            elif any(k in objeto_norm for k in KEYWORDS_BRITA[2]):
+                hit, score = next(k for k in KEYWORDS_BRITA[2] if k in objeto_norm), 2
+            elif any(k in objeto_norm for k in KEYWORDS_BRITA[1]):
+                hit, score = next(k for k in KEYWORDS_BRITA[1] if k in objeto_norm), 1
+            if hit:
+                ed["material"] = "brita"
+                ed["score"] = score
+                ed["score_label"] = SCORE_LABEL[score]
+                ed["keyword_trigger"] = hit
+                ed.setdefault("itens_encontrados", "")
+                sobreviventes.append(ed)
 
-    logging.info("%d editais após filtro keyword/estado/valor.", len(sobreviventes))
+    logging.info(
+        "%d editais após filtro keyword (concreto usinado + brita); %d descartados por exclusão.",
+        len(sobreviventes), descartados_exclusao,
+    )
     return sobreviventes
 
 
@@ -837,6 +956,7 @@ def _edital_para_linha(ed: dict, ts: str) -> list:
         ed.get("keyword_trigger", ""),
         ed.get("itens_encontrados", ""),
         ed.get("fonte", "PNCP"),
+        ed.get("origem_plataforma", ""),
     ]
 
 
@@ -920,6 +1040,7 @@ def _normalizar_comprasnet(item: dict) -> dict:
         "link_pncp": item.get("linkPncp") or "",
         "link_sistema_origem": link_orig,
         "fonte": "COMPRASNET",
+        "origem_plataforma": "ComprasNet",
         "_cnpj": "",
         "_ano_compra": "",
         "_seq_compra": "",
@@ -1027,6 +1148,7 @@ def _normalizar_bll(item: dict) -> dict:
         "link_pncp": "",
         "link_sistema_origem": link,
         "fonte": "BLL",
+        "origem_plataforma": "BLL",
         "_cnpj": "",
         "_ano_compra": "",
         "_seq_compra": "",

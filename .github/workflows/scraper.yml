@@ -31,7 +31,9 @@ jobs:
       GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
       GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
       # Configuração de produção (ignora PNCP_DATA_INICIAL/FINAL e usa janela relativa)
-      JANELA_DIAS: '1'
+      # Janela de 3 dias com sobreposição entre as 3 execuções diárias: garante que
+      # nenhuma licitação escape entre rodadas (a dedup por número de controle evita repetição).
+      JANELA_DIAS: '3'
       PNCP_MAX_PAGINAS: '50'
       PNCP_TIMEOUT_S: '60'
       PNCP_RETRY_COUNT: '2'
@@ -39,9 +41,10 @@ jobs:
       # Enriquecimento por itens: consulta endpoint de itens para editais genéricos (score=1)
       PNCP_BUSCAR_ITENS: 'true'
       PNCP_ITENS_MAX: '100'
-      # Filtro de valor mínimo (configurável para não descartar editais municipais menores)
-      VALOR_MINIMO_GERAL:    '50000'
-      VALOR_MINIMO_PEDREIRA: '80000'
+      # Captura SEM corte de valor (0 = pega tudo). O filtro de valor é feito na TELA
+      # (app.py), para nunca jogar fora uma licitação na coleta.
+      VALOR_MINIMO_GERAL:    '0'
+      VALOR_MINIMO_PEDREIRA: '0'
       # Notificações por e-mail (configure os 3 Secrets abaixo no GitHub)
       NOTIFICACAO_EMAIL_DE:    ${{ secrets.NOTIFICACAO_EMAIL_DE }}
       NOTIFICACAO_EMAIL_SENHA: ${{ secrets.NOTIFICACAO_EMAIL_SENHA }}
