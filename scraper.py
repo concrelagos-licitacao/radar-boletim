@@ -1467,8 +1467,9 @@ def enviar_notificacao_email(novos: list[dict]) -> None:
     """
     remetente = os.getenv("NOTIFICACAO_EMAIL_DE", "").strip()
     senha = os.getenv("NOTIFICACAO_EMAIL_SENHA", "").strip()
-    # Destino padrão: caixa oficial das licitações (sobrescreve via NOTIFICACAO_EMAIL_PARA).
-    destinatarios_raw = os.getenv("NOTIFICACAO_EMAIL_PARA", "licitacao.concrelagos@gmail.com").strip()
+    # Destino padrão: caixa oficial das licitações. Usa o padrão quando a env var
+    # está ausente OU vazia (o Actions seta a var vazia se o Secret não existir).
+    destinatarios_raw = (os.getenv("NOTIFICACAO_EMAIL_PARA") or "").strip() or "licitacao.concrelagos@gmail.com"
 
     # Só remetente + senha (App Password) precisam ser configurados; o destino já tem padrão.
     if not (remetente and senha):
