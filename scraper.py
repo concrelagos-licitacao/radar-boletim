@@ -1299,6 +1299,14 @@ def _coletar_comprasnet(data_inicial: date, data_final: date) -> list[dict]:
                         if resp.status_code in (204, 404):
                             payload = {"resultado": []}
                             break
+                        # Erro de cliente determinístico (ex.: 400 p/ modalidade não
+                        # suportada neste endpoint) → re-tentar não adianta. Pula este
+                        # uf/mod (o PNCP já cobre essa modalidade). 429 = rate limit (re-tenta).
+                        if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                            logging.info("Compras.gov.br HTTP %s (uf=%s mod=%s) — modalidade não aceita aqui; pula (PNCP cobre).",
+                                         resp.status_code, uf, mod)
+                            payload = None
+                            break
                         resp.raise_for_status()
                         payload = resp.json()
                         break
