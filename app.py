@@ -556,6 +556,27 @@ def _marcar_lido(num_controle: str) -> None:
         st.toast(f"Erro ao salvar no Sheets: {exc}", icon="⚠️")
 
 
+def _marcar_lidos_bulk(nums: list) -> None:
+    """Marca vários como lidos numa única gravação (1 append_rows) — para o botão
+    'Marcar dia como lido', evitando N chamadas ao Sheets."""
+    lidos = _lidos_set()
+    novos = [str(n) for n in nums if str(n) and str(n) not in lidos]
+    if not novos:
+        return
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, "Lidos", rows=2000, cols=1)
+        header = ws.acell("A1").value
+        if not header or header.strip() != "numero_controle_pncp":
+            ws.update("A1", [["numero_controle_pncp"]])
+        ws.append_rows([[n] for n in novos], value_input_option="USER_ENTERED")
+        lidos.update(novos)
+        st.session_state["lidos_set"] = lidos
+    except Exception as exc:
+        st.toast(f"Erro ao marcar dia como lido: {exc}", icon="⚠️")
+
+
 def _desmarcar_lido(num_controle: str) -> None:
     """Remove num_controle da aba 'Lidos' do Sheets e do session_state."""
     lidos = _lidos_set()
@@ -1002,42 +1023,68 @@ def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
 
 
 # ===== Abas =====
-def _aba_visao_geral(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
-    st.subheader("Visão Geral")
+def _aba_dashboard(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
+    st.markdown(
+        '<div class="cl-boletim-head">'
+        '<span class="cl-boletim-head-title">Dashboard</span>'
+        '<span class="cl-boletim-head-sub">Visão executiva · concreto usinado &amp; brita</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     if ed.empty:
         st.info("Nenhum edital qualificado ainda. Rode `python scraper.py` para popular.")
         return
 
-    total = len(ed)
-    valor_total = ed["valor_estimado"].sum() if "valor_estimado" in ed.columns else 0
-    concreto = (ed["material"] == "concreto").sum() if "material" in ed.columns else 0
-    brita = (ed["material"] == "brita").sum() if "material" in ed.columns else 0
-    proximos_7d = (
-        (ed["data_abertura"] >= pd.Timestamp.now()) &
-        (ed["data_abertura"] <= pd.Timestamp.now() + pd.Timedelta(days=7))
-    ).sum() if "data_abertura" in ed.columns else 0
+    agora = pd.Timestamp.now()
+    hoje = agora.normalize()
+
+    # Balde 1 — Novas hoje (pela data de execução do scraper; fallback abertura)
+    if "data_execucao" in ed.columns and ed["data_execucao"].notna().any():
+        novas_hoje = (pd.to_datetime(ed["data_execucao"], errors="coerce").dt.normalize() == hoje).sum()
+    elif "data_abertura" in ed.columns:
+        novas_hoje = (pd.to_datetime(ed["data_abertura"], errors="coerce").dt.normalize() == hoje).sum()
+    else:
+        novas_hoje = 0
+
+    # Balde 2 — CERTO (concreto/brita confirmado)
+    _score_num = pd.to_numeric(ed.get("score", pd.Series(dtype="float")), errors="coerce")
+    certo = int((_score_num == 3).sum())
+
+    # Balde 3 — Brita
+    brita = int((ed["material"] == "brita").sum()) if "material" in ed.columns else 0
+
+    # Balde 4 — Vence ≤7 dias (encerramento; fallback abertura)
+    _base = ed["data_encerramento"] if ("data_encerramento" in ed.columns and ed["data_encerramento"].notna().any()) else ed.get("data_abertura")
+    if _base is not None:
+        _b = pd.to_datetime(_base, errors="coerce")
+        vence_7d = int(((_b >= agora) & (_b <= agora + pd.Timedelta(days=7))).sum())
+    else:
+        vence_7d = 0
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(_card("Editais qualificados", f"{total}"), unsafe_allow_html=True)
-    c2.markdown(_card("Valor total estimado", _money(valor_total)), unsafe_allow_html=True)
-    c3.markdown(_card("Concreto / Brita", f"{concreto} / {brita}"), unsafe_allow_html=True)
-    c4.markdown(_card("Abertura próximos 7d", f"{proximos_7d}"), unsafe_allow_html=True)
+    c1.markdown(_card("Novas hoje", f"{int(novas_hoje)}"), unsafe_allow_html=True)
+    c2.markdown(_card("CERTO (concreto/brita)", f"{certo}"), unsafe_allow_html=True)
+    c3.markdown(_card("Brita", f"{brita}"), unsafe_allow_html=True)
+    c4.markdown(_card("Vence ≤ 7 dias", f"{vence_7d}"), unsafe_allow_html=True)
 
     st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
 
-    col_a, col_b = st.columns(2)
+    col_a, col_b = st.columns([1, 1.3])
     with col_a:
-        st.markdown("##### Distribuição por UF")
+        st.markdown("##### Por estado")
         if "uf" in ed.columns:
             por_uf = ed.groupby("uf").size().reset_index(name="qtd").sort_values("qtd", ascending=False)
-            st.bar_chart(por_uf.set_index("uf"))
+            st.bar_chart(por_uf.set_index("uf"), color="#C28E2C")
     with col_b:
         st.markdown("##### Top 5 oportunidades por valor")
         if "valor_estimado" in ed.columns:
-            top = ed.nlargest(5, "valor_estimado")[["orgao", "municipio", "uf", "valor_estimado", "material"]]
+            top = ed.nlargest(5, "valor_estimado")[["orgao", "municipio", "uf", "valor_estimado", "material"]].copy()
             top["valor_estimado"] = top["valor_estimado"].apply(_money)
             st.dataframe(top, width='stretch', hide_index=True)
+
+    st.caption(f"Total na base: {len(ed)} editais · {int((ed.get('material') == 'concreto').sum())} concreto · {brita} brita. "
+               "Veja a distribuição geográfica na aba **Mapa**.")
 
 
 def _aba_mapa(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
@@ -1174,7 +1221,9 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
         mat_sel = st.multiselect("Material", mats, default=mats)
         _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
-        _sc_labels = st.multiselect("Confiança", list(_score_op), default=list(_score_op))
+        # Padrão: só CERTO+PROVÁVEL. Obra genérica POSSÍVEL crua não chega mais
+        # (passa pelo portão de IA no scraper); fica disponível só p/ linhas legadas.
+        _sc_labels = st.multiselect("Confiança", list(_score_op), default=["CERTO", "PROVÁVEL"])
         score_sel = [_score_op[l] for l in _sc_labels]
         valor_min_sel = st.slider("Valor mínimo (R$)", 0, 2_000_000, 0, step=50_000, format="R$ %d")
         portais = sorted({
@@ -1292,6 +1341,18 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     _agrupar_por_dia = ordem in ("Mais recente", "Data abertura")
     _dia_atual = None
 
+    # Caixa de entrada: nº de não-lidas por dia (no df filtrado inteiro) para o
+    # cabeçalho do dia e o botão "Marcar dia como lido".
+    _nums_por_dia: dict = {}
+    if _agrupar_por_dia and "numero_controle_pncp" in df.columns:
+        for _, _r in df.iterrows():
+            try:
+                _dk = pd.to_datetime(_r.get("data_abertura"), errors="coerce")
+                _dk = _dk.date() if pd.notna(_dk) else None
+            except Exception:
+                _dk = None
+            _nums_por_dia.setdefault(_dk, []).append(str(_r.get("numero_controle_pncp") or ""))
+
     # ----- Cards estilo ConLicitação -----
     for idx, row in enumerate(df_page.itertuples(index=False), start=start + 1):
         d = row._asdict()
@@ -1308,10 +1369,21 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             if _dia != _dia_atual:
                 _dia_atual = _dia
                 _label_dia = _dia.strftime("%d/%m/%Y") if _dia else "Sem data"
-                st.markdown(
-                    f'<div class="cl-boletim-dia">{_label_dia}</div>',
-                    unsafe_allow_html=True,
-                )
+                _nums_dia = _nums_por_dia.get(_dia, [])
+                _nao_lidas_dia = [n for n in _nums_dia if n and n not in _lidos_set()]
+                _suf_dia = f" · {len(_nao_lidas_dia)} não lida(s)" if _nao_lidas_dia else " · tudo lido ✓"
+                _hcol1, _hcol2 = st.columns([4, 1.2])
+                with _hcol1:
+                    st.markdown(
+                        f'<div class="cl-boletim-dia">{_label_dia}{_suf_dia}</div>',
+                        unsafe_allow_html=True,
+                    )
+                with _hcol2:
+                    if _nao_lidas_dia and st.button("Marcar dia como lido",
+                                                    key=f"diaread_{_label_dia}_{idx}",
+                                                    width='stretch'):
+                        _marcar_lidos_bulk(_nao_lidas_dia)
+                        st.rerun()
         urgente = _eh_urgente(d.get("data_abertura"))
         objeto = (d.get("objeto") or "").strip() or "(sem descrição)"
         orgao = d.get("orgao") or "—"
@@ -1357,6 +1429,20 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         _score_map = {3: ("cl-score-3", "CERTO"), 2: ("cl-score-2", "PROVÁVEL"), 1: ("cl-score-1", "POSSÍVEL")}
         score_cls, score_txt = _score_map.get(score_val, ("cl-score-1", ""))
         tag_score_html = f'<span class="{score_cls}">{score_txt}</span>' if score_val else ""
+
+        # Selo "IA ✓" — obra genérica confirmada pelo portão de IA (score 1→2)
+        _ia_verif = str(d.get("ia_verificado")).strip().lower() in ("true", "1", "sim", "verdadeiro")
+        _ia_prod = str(d.get("ia_produto") or "").strip()
+        tag_ia_html = (
+            '<span class="cl-score-2" style="background:#FBF3E3;color:#8A6A1E;border:1px solid #C28E2C;">IA ✓</span>'
+            if (score_val == 2 and _ia_verif) else ""
+        )
+        ia_prod_html = (
+            f'<div style="font-size:0.8rem;color:#8A6A1E;margin-top:0.4rem;'
+            f'background:#FBF3E3;padding:0.35rem 0.6rem;border-radius:4px;border-left:3px solid #C28E2C;">'
+            f'<b>IA confirmou:</b> {_ia_prod[:180]}</div>'
+            if (score_val == 2 and _ia_verif and _ia_prod) else ""
+        )
 
         # Tag URGENTE (canto superior direito)
         tag_urgente_html = '<span class="cl-edital-urgent">URGENTE</span>' if urgente else ""
@@ -1415,13 +1501,14 @@ def _aba_editais(ed: pd.DataFrame) -> None:
             f'{icones_hdr_html}'
             f'</div>'
             f'<div class="cl-hdr-right">'
-            f'{tag_urgente_html}{tag_score_html}'
+            f'{tag_urgente_html}{tag_ia_html}{tag_score_html}'
             f'</div>'
             f'</div>'
             f'<div class="cl-edital-body">'
             f'<div class="cl-edital-objeto"><b>Objeto:</b> {origem_tag_html}{objeto[:400]}</div>'
             f'{kw_html}'
             f'{item_enc_html}'
+            f'{ia_prod_html}'
             f'{local_obra_html}'
             f'<div class="cl-edital-meta">'
             f'<div><b>Abertura:</b> {data_ab}</div>'
@@ -1686,9 +1773,11 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Modelo ConLicitação: Boletim é a tela principal; Mapa é o que preservamos
-    # do site antigo; Diário mostra a saúde do scraper (uso interno).
-    tab1, tab2, tab3 = st.tabs(["Boletim", "Mapa", "Diário"])
+    # Modelo ConLicitação: Dashboard (visão executiva) → Boletim (caixa de entrada)
+    # → Mapa (preservado do site antigo) → Diário (saúde do scraper).
+    tab0, tab1, tab2, tab3 = st.tabs(["Dashboard", "Boletim", "Mapa", "Diário"])
+    with tab0:
+        _aba_dashboard(ed, fil)
     with tab1:
         _aba_editais(ed)
     with tab2:

@@ -49,6 +49,11 @@ jobs:
       # (app.py), para nunca jogar fora uma licitação na coleta.
       VALOR_MINIMO_GERAL:    '0'
       VALOR_MINIMO_PEDREIRA: '0'
+      # Portão de IA: obra genérica (score=1) só é gravada se a Gemini confirmar
+      # concreto usinado/brita. Requer o Secret GEMINI_API_KEY (mesma chave do app).
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      IA_GATE_ATIVA: 'true'
+      IA_GATE_MAX:   '80'
       # Notificações por e-mail (configure os 3 Secrets abaixo no GitHub)
       NOTIFICACAO_EMAIL_DE:    ${{ secrets.NOTIFICACAO_EMAIL_DE }}
       NOTIFICACAO_EMAIL_SENHA: ${{ secrets.NOTIFICACAO_EMAIL_SENHA }}

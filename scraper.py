@@ -206,6 +206,14 @@ PNCP_BUSCAR_ITENS = os.getenv("PNCP_BUSCAR_ITENS", "false").lower() == "true"
 PNCP_ITENS_MAX = int(os.getenv("PNCP_ITENS_MAX", "50"))  # máximo de editais score=1 a consultar
 PNCP_ITENS_BASE_URL = "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{seq}/itens"
 
+# Portão de IA (Gemini): obra genérica (score=1) NÃO é gravada crua — passa ANTES
+# pela IA, que lê o edital e só promove se confirmar concreto usinado ou brita/pedras.
+# Custo zero: só modelos "flash" (camada gratuita). Requer GEMINI_API_KEY no ambiente.
+IA_GATE_ATIVA     = os.getenv("IA_GATE_ATIVA", "true").lower() == "true"
+IA_GATE_MAX       = int(os.getenv("IA_GATE_MAX", "80"))   # teto de chamadas Gemini por execução
+IA_GATE_MIN_CHARS = 100                                   # texto mínimo confiável para triar
+ABA_TRIAGEM       = "Triagem IA"                          # cache das decisões da IA
+
 PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 PNCP_TAMANHO_PAGINA = 50    # menor que 500 para evitar timeouts
 PNCP_TIMEOUT_S = int(os.getenv("PNCP_TIMEOUT_S", "60"))
@@ -271,6 +279,11 @@ OUTPUT_HEADER = [
     "fonte",                  # API consultada: "PNCP", "COMPRASNET", "BLL"…
     "origem_plataforma",      # plataforma operacional do edital (ex: "LICITANET", "BLL", "ComprasNet")
     "local_obra",             # local da obra detectado no texto (quando difere da sede do órgão) ou "a confirmar"
+    # -- portão de IA (obras genéricas confirmadas pela Gemini) --
+    "ia_verificado",          # True quando a IA confirmou concreto/brita numa obra genérica (score=1→2)
+    "ia_produto",             # produto que a IA identificou (ex: "concreto usinado fck 25")
+    "ia_justificativa",       # 1 frase da IA explicando a relevância
+    "ia_confianca",           # 0-100 confiança da IA
 ]
 
 # Mapeamento de modalidade PNCP → sigla e nome
@@ -1199,6 +1212,10 @@ def _edital_para_linha(ed: dict, ts: str) -> list:
         ed.get("fonte", "PNCP"),
         ed.get("origem_plataforma", ""),
         ed.get("local_obra", ""),
+        ed.get("ia_verificado", False),
+        ed.get("ia_produto", ""),
+        ed.get("ia_justificativa", ""),
+        ed.get("ia_confianca", ""),
     ]
 
 
@@ -1623,6 +1640,307 @@ def _gravar_execucao_sheets(sheet_id: str, dados: dict) -> None:
 
 
 # =========================================================================
+# PORTÃO DE IA — obra genérica (score=1) só entra se a Gemini confirmar
+# concreto usinado ou brita/pedras. Custo zero (flash-only). Cache em "Triagem IA".
+# =========================================================================
+_PAGOS_IA = ("pro", "ultra", "exp", "thinking")
+
+
+def _eh_modelo_gratuito(nome: str) -> bool:
+    n = (nome or "").lower()
+    return "flash" in n and "vision" not in n and not any(p in n for p in _PAGOS_IA)
+
+
+def _gemini_client_scraper():
+    """Cliente Gemini para o scraper (só env GEMINI_API_KEY; sem Streamlit)."""
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        from google import genai
+        return genai.Client(api_key=key)
+    except Exception as exc:
+        logging.warning("Gemini indisponível (import/cliente): %s", exc)
+        return None
+
+
+def _modelos_gemini_gratuitos(client) -> list[str]:
+    """Lista de modelos 'flash' gratuitos (descoberta dinâmica + candidatos conhecidos)."""
+    modelos: list[str] = []
+    try:
+        for _m in client.models.list():
+            _nome = (getattr(_m, "name", "") or "").split("/")[-1]
+            _acts = getattr(_m, "supported_actions", None) or []
+            if _nome and _eh_modelo_gratuito(_nome) and ("generateContent" in _acts or not _acts):
+                modelos.append(_nome)
+    except Exception:
+        pass
+    for _c in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash-001"]:
+        if _c not in modelos and _eh_modelo_gratuito(_c):
+            modelos.append(_c)
+    return modelos
+
+
+def _baixar_texto_edital_scraper(num_controle: str, link_pdf: str, link_pncp: str) -> str:
+    """Obtém o TEXTO do edital (PDF real via API de arquivos do PNCP → pdfplumber;
+    fallback link_sistema_origem e página HTML). Retorna "" se nada utilizável."""
+    import io, re
+    import pdfplumber
+
+    HDRS = {"User-Agent": "Mozilla/5.0 (compatible; ConcrelagosBot/1.0)"}
+    urls: list[str] = []
+    try:
+        nc = (num_controle or "").strip()
+        if "/" in nc and "-" in nc:
+            esquerda, ano = nc.split("/", 1)
+            partes = esquerda.split("-")
+            cnpj, seq = partes[0], partes[-1]
+            seq_int = str(int(seq))
+            api = (f"https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}"
+                   f"/compras/{ano}/{seq_int}/arquivos")
+            r = requests.get(api, timeout=30, headers=HDRS)
+            if r.status_code == 200:
+                for arq in (r.json() or []):
+                    u = arq.get("url") or arq.get("uri") or arq.get("link")
+                    if u:
+                        urls.append(u)
+    except Exception:
+        pass
+    if link_pdf:
+        urls.append(link_pdf)
+    if link_pncp:
+        urls.append(link_pncp)
+
+    for u in urls:
+        try:
+            resp = requests.get(u, timeout=30, allow_redirects=True, headers=HDRS)
+            resp.raise_for_status()
+            ct = resp.headers.get("content-type", "").lower()
+            eh_pdf = ("pdf" in ct) or resp.content[:5].startswith(b"%PDF") or u.lower().endswith(".pdf")
+            if eh_pdf:
+                with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+                    txt = "\n".join((p.extract_text() or "") for p in pdf.pages[:20]).strip()
+                if len(txt) >= IA_GATE_MIN_CHARS:
+                    return txt
+            else:
+                html = resp.text
+                html = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+                txt = re.sub(r"<[^>]+>", " ", html)
+                txt = re.sub(r"\s+", " ", txt).strip()
+                if len(txt) >= 200:
+                    return txt[:12000]
+        except Exception:
+            continue
+    return ""
+
+
+_PROMPT_TRIAGEM = (
+    "Você é um analista de licitações da Concrelagos, que vende SOMENTE dois produtos:\n"
+    "(1) CONCRETO USINADO (concreto fresco dosado em central, entregue por betoneira) e\n"
+    "(2) BRITA / PEDRAS britadas (agregado graúdo de pedreira: brita, pedrisco, pó de pedra, rachão, cascalho).\n"
+    "Responda se o edital envolve COMPRA ou FORNECIMENTO de um desses dois produtos.\n"
+    "NÃO é relevante: asfalto/CBUQ/massa asfáltica, cimento ensacado, artefatos de cimento "
+    "(tubos, postes, blocos, manilhas, meio-fio, piso intertravado, pré-moldados), nem obra "
+    "genérica sem fornecimento explícito de concreto usinado ou brita.\n"
+    "Responda APENAS com JSON válido, sem markdown:\n"
+    '{"relevante": true|false, "material": "concreto"|"brita"|null, '
+    '"produto": "string curta ou vazio", "confianca": 0-100, "justificativa": "1 frase"}\n\n'
+    "Edital (primeiros 10000 caracteres):\n"
+)
+
+
+def _triar_edital_ia(ed: dict, client, modelos: list[str]) -> dict | None:
+    """Pergunta à Gemini se a obra genérica tem concreto usinado / brita.
+    Retorna dict {relevante, material, produto, confianca, justificativa} OU
+    None quando NÃO deu pra concluir (sem texto / 429-404 / JSON inválido) = pendente.
+    """
+    import json
+    try:
+        texto = _baixar_texto_edital_scraper(
+            ed.get("numero_controle_pncp", ""),
+            ed.get("link_sistema_origem", ""),
+            ed.get("link_pncp", ""),
+        )
+        if not texto or len(texto) < IA_GATE_MIN_CHARS:
+            return None  # PDF escaneado/indisponível → pendente
+
+        prompt = _PROMPT_TRIAGEM + texto[:10000]
+        response = None
+        for _modelo in modelos:
+            try:
+                response = client.models.generate_content(model=_modelo, contents=prompt)
+                break
+            except Exception as _exc:
+                s = str(_exc)
+                if any(t in s for t in ("429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND", "not found", "not supported")):
+                    continue
+                logging.warning("Gemini erro inesperado (%s): %s", _modelo, s[:160])
+                continue
+        if response is None:
+            return None  # nenhum modelo respondeu (cota/erro) → pendente
+
+        raw = (getattr(response, "text", "") or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.rstrip("`").strip()
+        dados = json.loads(raw)
+
+        material = dados.get("material")
+        if material not in ("concreto", "brita"):
+            material = None
+        relevante = bool(dados.get("relevante"))
+        # Guarda de brita: brita só vale no RJ (mesmo que a IA diga brita em outro estado).
+        if material == "brita" and ed.get("uf") not in ESTADOS_BRITA:
+            relevante = False
+        try:
+            conf = max(0, min(100, int(dados.get("confianca") or 0)))
+        except (TypeError, ValueError):
+            conf = 0
+        return {
+            "relevante": relevante,
+            "material": material,
+            "produto": str(dados.get("produto") or "").strip()[:120],
+            "confianca": conf,
+            "justificativa": str(dados.get("justificativa") or "").strip()[:200],
+        }
+    except json.JSONDecodeError:
+        return None
+    except Exception as exc:
+        logging.warning("Triagem IA falhou (%s): %s", ed.get("numero_controle_pncp", "?"), exc)
+        return None
+
+
+_TRIAGEM_HEADER = [
+    "numero_controle_pncp", "data_triagem", "relevante",
+    "material", "produto", "confianca", "justificativa", "status",
+]
+
+
+def _carregar_triagem(sheet_id: str) -> dict:
+    """Carrega o cache de decisões da IA (aba 'Triagem IA'). Falha silenciosa → {}.
+    Mantém a ÚLTIMA linha por numero_controle (um 'verificado' sobrepõe um 'pendente')."""
+    cache: dict = {}
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        ws = gc.open_by_key(sheet_id).worksheet(ABA_TRIAGEM)
+        for r in ws.get_all_records():
+            nc = str(r.get("numero_controle_pncp", "")).strip()
+            if nc:
+                cache[nc] = r
+    except Exception:
+        pass
+    return cache
+
+
+def _gravar_triagem(sheet_id: str, linhas: list[list]) -> None:
+    """Grava (append) as decisões novas da IA na aba 'Triagem IA' (1 chamada batched)."""
+    if not linhas:
+        return
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet(ABA_TRIAGEM)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=ABA_TRIAGEM, rows=2000, cols=len(_TRIAGEM_HEADER))
+            ws.append_row(_TRIAGEM_HEADER, value_input_option="USER_ENTERED")
+        vals = ws.get_all_values()
+        if not vals or vals[0] != _TRIAGEM_HEADER:
+            if not vals:
+                ws.append_row(_TRIAGEM_HEADER, value_input_option="USER_ENTERED")
+        ws.append_rows(linhas, value_input_option="USER_ENTERED")
+    except Exception as exc:
+        logging.warning("Não foi possível gravar Triagem IA: %s", exc)
+
+
+def _promover_da_ia(ed: dict, material, produto, justificativa, confianca) -> None:
+    """Promove uma obra genérica confirmada pela IA: score 1 → 2 + campos ia_*."""
+    ed["score"] = 2
+    ed["score_label"] = SCORE_LABEL[2]
+    if material in ("concreto", "brita"):
+        ed["material"] = material
+    ed["ia_verificado"] = True
+    ed["ia_produto"] = produto or ""
+    ed["ia_justificativa"] = justificativa or ""
+    ed["ia_confianca"] = confianca if confianca != "" else ""
+
+
+def aplicar_gate_ia(qualificados: list[dict], sheet_id: str) -> list[dict]:
+    """PORTÃO DE IA. Obras genéricas (score=1) só passam se a Gemini confirmar
+    concreto usinado / brita. score>=2 (keyword) sempre bypassa. Rodado APÓS a geo,
+    então a IA só lê editais geograficamente relevantes. Regra: POSSÍVEL não
+    confirmada NUNCA é gravada; pendentes ficam no cache para re-tentar depois."""
+    if not IA_GATE_ATIVA:
+        return qualificados
+
+    score1 = [ed for ed in qualificados if int(ed.get("score") or 0) == 1]
+    resto = [ed for ed in qualificados if int(ed.get("score") or 0) != 1]
+    if not score1:
+        return qualificados
+
+    cache = _carregar_triagem(sheet_id)
+    ts = datetime.now().isoformat(timespec="seconds")
+    novas_linhas: list[list] = []
+    promovidos: list[dict] = []
+    cache_hit = chamadas = negados = pendentes = 0
+
+    client = _gemini_client_scraper()
+    if client is None:
+        logging.warning("IA-GATE: GEMINI_API_KEY ausente — %d obra(s) genérica(s) NÃO gravadas "
+                        "(pendentes p/ próxima execução com a chave).", len(score1))
+        for ed in score1:
+            nc = ed.get("numero_controle_pncp", "")
+            if nc and nc not in cache:
+                novas_linhas.append([nc, ts, "", "", "", "", "", "pendente"])
+        _gravar_triagem(sheet_id, novas_linhas)
+        return resto
+
+    # 1) resolve pelo cache; só não-cacheados (ou 'pendente') consomem Gemini
+    a_triar: list[dict] = []
+    for ed in score1:
+        nc = ed.get("numero_controle_pncp", "")
+        c = cache.get(nc)
+        if c and str(c.get("status")) == "verificado":
+            _promover_da_ia(ed, c.get("material"), c.get("produto"),
+                            c.get("justificativa"), c.get("confianca", ""))
+            promovidos.append(ed); cache_hit += 1
+        elif c and str(c.get("status")) == "negado":
+            cache_hit += 1  # descarta (não entra)
+        else:
+            a_triar.append(ed)
+
+    # 2) ordena por valor desc e aplica teto IA_GATE_MAX (excedente vira pendente)
+    a_triar.sort(key=lambda e: float(e.get("valor_estimado") or 0), reverse=True)
+    modelos = _modelos_gemini_gratuitos(client)
+    for i, ed in enumerate(a_triar):
+        nc = ed.get("numero_controle_pncp", "")
+        if i >= IA_GATE_MAX:
+            novas_linhas.append([nc, ts, "", "", "", "", "", "pendente"]); pendentes += 1
+            continue
+        v = _triar_edital_ia(ed, client, modelos)
+        chamadas += 1
+        if v is None:
+            novas_linhas.append([nc, ts, "", "", "", "", "", "pendente"]); pendentes += 1
+        elif v["relevante"]:
+            _promover_da_ia(ed, v["material"], v["produto"], v["justificativa"], v["confianca"])
+            promovidos.append(ed)
+            novas_linhas.append([nc, ts, True, v["material"] or "", v["produto"],
+                                 v["confianca"], v["justificativa"], "verificado"])
+        else:
+            novas_linhas.append([nc, ts, False, v["material"] or "", v["produto"],
+                                 v["confianca"], v["justificativa"], "negado"]); negados += 1
+
+    _gravar_triagem(sheet_id, novas_linhas)
+    logging.info("IA-GATE: score1=%d -> cache_hit=%d, chamadas=%d, promovidos=%d, negados=%d, pendentes=%d",
+                 len(score1), cache_hit, chamadas, len(promovidos), negados, pendentes)
+    return resto + promovidos
+
+
+# =========================================================================
 # ORQUESTRADOR
 # =========================================================================
 def main() -> None:
@@ -1674,6 +1992,8 @@ def main() -> None:
         pre = filtrar_por_keyword_estado_valor(brutos)
         pre = enriquecer_com_itens(pre)   # promove score=1 → score=2 via endpoint de itens
         qualificados = qualificar_por_distancia(pre, filiais)
+        # PORTÃO DE IA: obra genérica (score=1) só passa se a Gemini confirmar concreto/brita.
+        qualificados = aplicar_gate_ia(qualificados, sheet_id)
         novos = gravar_em_sheets(qualificados, sheet_id)
     except Exception as exc:
         erro_execucao = str(exc)
