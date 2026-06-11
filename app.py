@@ -314,6 +314,11 @@ st.markdown(
     }
     .stButton button *, [data-testid="stButton"] button * { color:#fff !important; }
     .stButton button:hover, [data-testid="stButton"] button:hover { background:#2E353D !important; border-color:#2E353D !important; }
+    /* Botão "primary" = ativo (navegação) → dourado */
+    [data-testid="stBaseButton-primary"], .stButton button[kind="primary"] {
+        background:#C28E2C !important; border:1px solid #C28E2C !important; }
+    [data-testid="stBaseButton-primary"]:hover, .stButton button[kind="primary"]:hover {
+        background:#A9781F !important; border-color:#A9781F !important; }
     .stDownloadButton button, [data-testid="stDownloadButton"] button {
         background:#C28E2C !important; border:1px solid #C28E2C !important; border-radius:6px !important;
         font-weight:600 !important; font-size:0.78rem !important; padding:0.28rem 0.7rem !important;
@@ -1023,6 +1028,17 @@ def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
 
 
 # ===== Abas =====
+def _ir_boletim(conf=None, mat=None, extra=None) -> None:
+    """Pré-aplica filtros e navega para o Boletim (usado pelos KPIs clicáveis)."""
+    if conf is not None:
+        st.session_state["f_conf"] = list(conf)
+    if mat is not None:
+        st.session_state["f_mat"] = list(mat)
+    st.session_state["f_extra"] = extra
+    st.session_state["pagina"] = "Boletim"
+    st.rerun()
+
+
 def _aba_dashboard(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
     st.markdown(
         '<div class="cl-boletim-head">'
@@ -1039,34 +1055,59 @@ def _aba_dashboard(ed: pd.DataFrame, fil: pd.DataFrame) -> None:
     agora = pd.Timestamp.now()
     hoje = agora.normalize()
 
-    # Balde 1 — Novas hoje (pela data de execução do scraper; fallback abertura)
+    _score_num = pd.to_numeric(ed.get("score", pd.Series(dtype="float")), errors="coerce")
+    _rel = _score_num >= 2   # relevantes = CERTO + PROVÁVEL
+    _TODOS_MAT = ["brita", "concreto"]
+
+    # Aberto = pregão ainda não ocorreu (mesma regra do filtro "Abertas" do Boletim,
+    # p/ os números do Dashboard baterem com o que o Boletim mostra ao clicar).
+    _bcol = ed["data_encerramento"] if ("data_encerramento" in ed.columns and ed["data_encerramento"].notna().any()) else ed.get("data_abertura")
+    if _bcol is not None:
+        _bz = pd.to_datetime(_bcol, errors="coerce", utc=True)
+        _ag = pd.Timestamp.now(tz="UTC")
+        _aberto = _bz.isna() | (_bz >= _ag)
+    else:
+        _aberto = pd.Series(True, index=ed.index)
+
+    # Balde 1 — Novas hoje (relevantes e abertas, pela data de execução do scraper)
     if "data_execucao" in ed.columns and ed["data_execucao"].notna().any():
-        novas_hoje = (pd.to_datetime(ed["data_execucao"], errors="coerce").dt.normalize() == hoje).sum()
-    elif "data_abertura" in ed.columns:
-        novas_hoje = (pd.to_datetime(ed["data_abertura"], errors="coerce").dt.normalize() == hoje).sum()
+        _hoje_mask = pd.to_datetime(ed["data_execucao"], errors="coerce").dt.normalize() == hoje
+        novas_hoje = int((_hoje_mask & _rel & _aberto).sum())
     else:
         novas_hoje = 0
 
-    # Balde 2 — CERTO (concreto/brita confirmado)
-    _score_num = pd.to_numeric(ed.get("score", pd.Series(dtype="float")), errors="coerce")
-    certo = int((_score_num == 3).sum())
+    # Balde 2 — CERTO (concreto/brita confirmado, aberto)
+    certo = int(((_score_num == 3) & _aberto).sum())
 
-    # Balde 3 — Brita
-    brita = int((ed["material"] == "brita").sum()) if "material" in ed.columns else 0
+    # Balde 3 — Brita (qualquer confiança, aberto)
+    brita = int(((ed["material"] == "brita") & _aberto).sum()) if "material" in ed.columns else 0
 
-    # Balde 4 — Vence ≤7 dias (encerramento; fallback abertura)
+    # Balde 4 — Vence ≤7 dias (relevantes; encerramento, fallback abertura)
     _base = ed["data_encerramento"] if ("data_encerramento" in ed.columns and ed["data_encerramento"].notna().any()) else ed.get("data_abertura")
     if _base is not None:
         _b = pd.to_datetime(_base, errors="coerce")
-        vence_7d = int(((_b >= agora) & (_b <= agora + pd.Timedelta(days=7))).sum())
+        vence_7d = int((((_b >= agora) & (_b <= agora + pd.Timedelta(days=7))) & _rel).sum())
     else:
         vence_7d = 0
 
+    st.caption("Clique em **Ver** num card para abrir esses editais no Boletim, já filtrados.")
     c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(_card("Novas hoje", f"{int(novas_hoje)}"), unsafe_allow_html=True)
-    c2.markdown(_card("CERTO (concreto/brita)", f"{certo}"), unsafe_allow_html=True)
-    c3.markdown(_card("Brita", f"{brita}"), unsafe_allow_html=True)
-    c4.markdown(_card("Vence ≤ 7 dias", f"{vence_7d}"), unsafe_allow_html=True)
+    with c1:
+        st.markdown(_card("Novas hoje", f"{novas_hoje}"), unsafe_allow_html=True)
+        if st.button("Ver →", key="kpi_novas", width='stretch'):
+            _ir_boletim(conf=["CERTO", "PROVÁVEL"], mat=_TODOS_MAT, extra="hoje")
+    with c2:
+        st.markdown(_card("CERTO (concreto/brita)", f"{certo}"), unsafe_allow_html=True)
+        if st.button("Ver →", key="kpi_certo", width='stretch'):
+            _ir_boletim(conf=["CERTO"], mat=_TODOS_MAT, extra=None)
+    with c3:
+        st.markdown(_card("Brita", f"{brita}"), unsafe_allow_html=True)
+        if st.button("Ver →", key="kpi_brita", width='stretch'):
+            _ir_boletim(conf=["CERTO", "PROVÁVEL", "POSSÍVEL"], mat=["brita"], extra=None)
+    with c4:
+        st.markdown(_card("Vence ≤ 7 dias", f"{vence_7d}"), unsafe_allow_html=True)
+        if st.button("Ver →", key="kpi_vence", width='stretch'):
+            _ir_boletim(conf=["CERTO", "PROVÁVEL"], mat=_TODOS_MAT, extra="vence7")
 
     st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
 
@@ -1219,11 +1260,17 @@ def _aba_editais(ed: pd.DataFrame) -> None:
     # --- Demais filtros recolhidos (deixa o topo limpo) ---
     with st.popover("Mais filtros", width='content'):
         mats = sorted(ed["material"].dropna().unique().tolist()) if "material" in ed.columns and not ed.empty else ["concreto", "brita"]
-        mat_sel = st.multiselect("Material", mats, default=mats)
+        if "f_mat" not in st.session_state:
+            st.session_state["f_mat"] = mats
+        st.session_state["f_mat"] = [m for m in st.session_state["f_mat"] if m in mats] or mats
+        mat_sel = st.multiselect("Material", mats, key="f_mat")
         _score_op = {"CERTO": 3, "PROVÁVEL": 2, "POSSÍVEL": 1}
-        # Padrão: só CERTO+PROVÁVEL. Obra genérica POSSÍVEL crua não chega mais
-        # (passa pelo portão de IA no scraper); fica disponível só p/ linhas legadas.
-        _sc_labels = st.multiselect("Confiança", list(_score_op), default=["CERTO", "PROVÁVEL"])
+        # Padrão: só CERTO+PROVÁVEL (POSSÍVEL cru não chega mais). Os KPIs do
+        # Dashboard pré-ajustam este filtro via session_state["f_conf"].
+        if "f_conf" not in st.session_state:
+            st.session_state["f_conf"] = ["CERTO", "PROVÁVEL"]
+        st.session_state["f_conf"] = [l for l in st.session_state["f_conf"] if l in _score_op] or ["CERTO", "PROVÁVEL"]
+        _sc_labels = st.multiselect("Confiança", list(_score_op), key="f_conf")
         score_sel = [_score_op[l] for l in _sc_labels]
         valor_min_sel = st.slider("Valor mínimo (R$)", 0, 2_000_000, 0, step=50_000, format="R$ %d")
         portais = sorted({
@@ -1265,6 +1312,28 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 df = df[b.isna() | (b >= agora)]
             else:  # Encerradas
                 df = df[b < agora]
+
+    # Filtro vindo de um card do Dashboard ("Novas hoje" / "Vence ≤ 7 dias")
+    _extra = st.session_state.get("f_extra")
+    if _extra:
+        _ag = pd.Timestamp.now(tz="UTC")
+        _lbl = ""
+        if _extra == "hoje" and "data_execucao" in df.columns:
+            _dx = pd.to_datetime(df["data_execucao"], errors="coerce").dt.date
+            df = df[_dx == pd.Timestamp.now().date()]
+            _lbl = "novas de hoje"
+        elif _extra == "vence7":
+            _bc = df["data_encerramento"] if ("data_encerramento" in df.columns and df["data_encerramento"].notna().any()) else df.get("data_abertura")
+            if _bc is not None:
+                _bb = pd.to_datetime(_bc, errors="coerce", utc=True)
+                df = df[(_bb >= _ag) & (_bb <= _ag + pd.Timedelta(days=7))]
+            _lbl = "vencem em ≤ 7 dias"
+        if _lbl:
+            _ex1, _ex2 = st.columns([4, 1])
+            _ex1.info(f"Filtro do Dashboard: **{_lbl}**")
+            if _ex2.button("Limpar filtro", key="limpar_extra", width='stretch'):
+                st.session_state["f_extra"] = None
+                st.rerun()
 
     # Portal / origem
     if portal_sel and ("origem_plataforma" in df.columns or "fonte" in df.columns):
@@ -1773,16 +1842,27 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Modelo ConLicitação: Dashboard (visão executiva) → Boletim (caixa de entrada)
-    # → Mapa (preservado do site antigo) → Diário (saúde do scraper).
-    tab0, tab1, tab2, tab3 = st.tabs(["Dashboard", "Boletim", "Mapa", "Diário"])
-    with tab0:
+    # Navegação por botões (controlável via código — permite que os KPIs do
+    # Dashboard levem direto ao Boletim já filtrado). Ativo = dourado.
+    _PAGINAS = ["Dashboard", "Boletim", "Mapa", "Diário"]
+    if "pagina" not in st.session_state:
+        st.session_state["pagina"] = "Dashboard"
+    _navc = st.columns(len(_PAGINAS))
+    for _i, _nm in enumerate(_PAGINAS):
+        if _navc[_i].button(_nm, key=f"nav_{_nm}", width='stretch',
+                            type=("primary" if st.session_state["pagina"] == _nm else "secondary")):
+            st.session_state["pagina"] = _nm
+            st.rerun()
+    st.markdown('<div style="margin-top:0.2rem;"></div>', unsafe_allow_html=True)
+
+    _pg = st.session_state["pagina"]
+    if _pg == "Dashboard":
         _aba_dashboard(ed, fil)
-    with tab1:
+    elif _pg == "Boletim":
         _aba_editais(ed)
-    with tab2:
+    elif _pg == "Mapa":
         _aba_mapa(ed, fil)
-    with tab3:
+    else:
         _aba_diario(ed, ultima)
 
 
