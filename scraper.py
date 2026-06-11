@@ -1688,9 +1688,12 @@ def _modelos_gemini_gratuitos(client) -> list[str]:
                 modelos.append(_nome)
     except Exception:
         pass
-    for _c in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash-001"]:
+    for _c in ["gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash",
+               "gemini-2.0-flash", "gemini-flash-latest"]:
         if _c not in modelos and _eh_modelo_gratuito(_c):
             modelos.append(_c)
+    # Prioriza modelos "lite" (limites grátis maiores / menos disputados → menos 429).
+    modelos.sort(key=lambda m: 0 if "lite" in m else 1)
     return modelos
 
 
@@ -1779,9 +1782,13 @@ def _triar_edital_ia(ed: dict, client, modelos: list[str]) -> dict | None:
 
         prompt = _PROMPT_TRIAGEM + texto[:10000]
         response = None
-        for _modelo in modelos:
+        for _modelo in list(modelos):
             try:
                 response = client.models.generate_content(model=_modelo, contents=prompt)
+                # Sticky: o modelo que funcionou vai pro topo p/ as próximas chamadas
+                # (evita repetir os 429 dos modelos sem cota a cada edital).
+                if modelos and modelos[0] != _modelo and _modelo in modelos:
+                    modelos.remove(_modelo); modelos.insert(0, _modelo)
                 break
             except Exception as _exc:
                 s = str(_exc)
