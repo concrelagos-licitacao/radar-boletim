@@ -212,6 +212,7 @@ PNCP_ITENS_BASE_URL = "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{an
 IA_GATE_ATIVA     = os.getenv("IA_GATE_ATIVA", "true").lower() == "true"
 IA_GATE_MAX       = int(os.getenv("IA_GATE_MAX", "80"))   # teto de chamadas Gemini por execução
 IA_GATE_MIN_CHARS = 100                                   # texto mínimo confiável para triar
+IA_GATE_PAUSA_S   = float(os.getenv("IA_GATE_PAUSA_S", "4.5"))  # pausa entre editais (free tier = 15 req/min)
 ABA_TRIAGEM       = "Triagem IA"                          # cache das decisões da IA
 
 PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
@@ -1652,12 +1653,15 @@ def _gravar_execucao_sheets(sheet_id: str, dados: dict) -> None:
 # PORTÃO DE IA — obra genérica (score=1) só entra se a Gemini confirmar
 # concreto usinado ou brita/pedras. Custo zero (flash-only). Cache em "Triagem IA".
 # =========================================================================
-_PAGOS_IA = ("pro", "ultra", "exp", "thinking")
+# Exclui pagos (pro/ultra/exp/thinking) e modelos não-texto (tts/audio/image/...)
+# que só desperdiçariam tentativas/cota na triagem.
+_PAGOS_IA = ("pro", "ultra", "exp", "thinking", "vision", "tts",
+             "audio", "image", "live", "embedding", "preview")
 
 
 def _eh_modelo_gratuito(nome: str) -> bool:
     n = (nome or "").lower()
-    return "flash" in n and "vision" not in n and not any(p in n for p in _PAGOS_IA)
+    return "flash" in n and not any(p in n for p in _PAGOS_IA)
 
 
 def _gemini_client_scraper():
@@ -1932,6 +1936,7 @@ def aplicar_gate_ia(qualificados: list[dict], sheet_id: str) -> list[dict]:
             continue
         v = _triar_edital_ia(ed, client, modelos)
         chamadas += 1
+        time.sleep(IA_GATE_PAUSA_S)   # ritma p/ ficar abaixo do limite por minuto (free tier)
         if v is None:
             novas_linhas.append([nc, ts, "", "", "", "", "", "pendente"]); pendentes += 1
         elif v["relevante"]:
