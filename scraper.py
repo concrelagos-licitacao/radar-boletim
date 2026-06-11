@@ -817,8 +817,10 @@ def enriquecer_com_itens(editais: list[dict]) -> list[dict]:
     if not PNCP_BUSCAR_ITENS:
         return editais
 
-    # Todas as keywords score=3 de concreto + brita (para verificação nos itens)
-    kw_diretas = set(KEYWORDS_CONCRETO[3]) | set(KEYWORDS_BRITA[3])
+    # Keywords score=3 separadas por material: item de BRITA só promove edital
+    # em estado coberto por pedreira (brita é SÓ RJ) — senão driblaria a regra.
+    kw_concreto3 = set(KEYWORDS_CONCRETO[3])
+    kw_brita3 = set(KEYWORDS_BRITA[3])
 
     candidatos = [ed for ed in editais if ed.get("score") == 1]
     if not candidatos:
@@ -838,11 +840,18 @@ def enriquecer_com_itens(editais: list[dict]) -> list[dict]:
             descricoes = _buscar_itens_edital(cnpj, ano, seq)
 
             for desc_norm in descricoes:
-                hit = next((k for k in kw_diretas if k in desc_norm), None)
+                hit_concreto = next((k for k in kw_concreto3 if k in desc_norm), None)
+                hit_brita = next((k for k in kw_brita3 if k in desc_norm), None)
+                # Brita só vale em estado coberto por pedreira (RJ).
+                if hit_brita and ed.get("uf") not in ESTADOS_BRITA:
+                    hit_brita = None
+                hit = hit_concreto or hit_brita
                 if hit:
                     ed["score"] = 2
                     ed["score_label"] = SCORE_LABEL[2]
                     ed["itens_encontrados"] = desc_norm[:200]
+                    if hit_brita and not hit_concreto:
+                        ed["material"] = "brita"
                     promovidos += 1
                     logging.info("Edital %s promovido a score=2 via item '%s'.",
                                  ed.get("numero_controle_pncp", "?"), hit)
@@ -2013,10 +2022,18 @@ def main() -> None:
         logging.warning("FUNIL: editais passaram pelo keyword mas todos descartados pela qualificação geográfica. "
                         "Verifique se as filiais têm coordenadas válidas no Sheets.")
 
+    # Coleta vazia sem exceção = provável throttling no runner — marca como alerta
+    # (não "ok") para não mascarar o problema na auditoria.
+    if not erro_execucao and len(brutos) == 0:
+        erro_execucao = "coleta vazia (0 brutos) — possivel throttling/instabilidade das APIs"
+        status_exec = "alerta"
+    else:
+        status_exec = "erro" if erro_execucao else "ok"
+
     # Grava execução na aba "Execucoes" do Sheets (auditoria permanente)
     _gravar_execucao_sheets(sheet_id, {
         "data_execucao": datetime.now().isoformat(timespec="seconds"),
-        "status": "erro" if erro_execucao else "ok",
+        "status": status_exec,
         "brutos": len(brutos),
         "apos_keyword": len(pre),
         "apos_geo": len(qualificados),
