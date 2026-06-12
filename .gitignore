@@ -17,6 +17,9 @@ venv/
 # Arquivos jurídicos sensíveis (PDFs de contrato social etc.)
 EMPRESAS/*.pdf
 
+# Backups CSV das limpezas de planilha (locais, não versionar)
+.backup_*.csv
+
 # Markdown auto-gerados de PDFs (se reaparecerem)
 *.md
 !DEPLOY.md
