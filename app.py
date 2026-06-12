@@ -1800,6 +1800,409 @@ def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
     st.dataframe(por_dia[["data", "editais", "valor_fmt"]], width='stretch', hide_index=True)
 
 
+# =========================================================================
+# HISTÓRICO — espelho da planilha comercial (PREGOES / GANHAS / ADITIVOS)
+# Site → planilha: formulário (append imediato). Planilha → site: cache 60s.
+# =========================================================================
+HISTORICO_SHEET_ID = "1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg"
+_SA_EMAIL = "scraper-bot@concrelagos-hub.iam.gserviceaccount.com"
+
+
+def _num_br_solto(v) -> float:
+    """Parse tolerante p/ números da planilha comercial ('1.125', 'R$ 202.300,00')."""
+    s = str(v or "").strip()
+    s = s.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+@st.cache_data(ttl=60, show_spinner="Carregando histórico...")
+def _carregar_historico() -> dict:
+    """{titulo_aba: (header_original, header_limpo, linhas[dict])} da planilha comercial."""
+    gc = _build_gspread_client()
+    sh = gc.open_by_key(HISTORICO_SHEET_ID)
+    out: dict = {}
+    for ws in sh.worksheets():
+        vals = ws.get_all_values()
+        if not vals:
+            out[ws.title] = ([], [], [])
+            continue
+        header_orig = vals[0]
+        header_limpo = [" ".join(str(h).split()) for h in header_orig]
+        linhas = []
+        for r in vals[1:]:
+            if not any(str(c).strip() for c in r):
+                continue
+            r = list(r) + [""] * (len(header_limpo) - len(r))
+            linhas.append(dict(zip(header_limpo, r)))
+        out[ws.title] = (header_orig, header_limpo, linhas)
+    return out
+
+
+def _adicionar_historico(aba_titulo: str, linha: list) -> bool:
+    """Acrescenta um registro na aba da planilha comercial (site → planilha)."""
+    try:
+        gc = _build_gspread_client()
+        ws = gc.open_by_key(HISTORICO_SHEET_ID).worksheet(aba_titulo)
+        ws.append_row(linha, value_input_option="USER_ENTERED")
+        return True
+    except Exception as exc:
+        if "403" in str(exc) or "permission" in str(exc).lower():
+            st.error(
+                "Sem permissão de ESCRITA na planilha comercial. Abra a planilha no Google Sheets "
+                f"→ Compartilhar → adicione {_SA_EMAIL} como **Editor** (hoje está só como leitor). "
+                "Depois disso o formulário grava normalmente."
+            )
+        else:
+            st.error(f"Erro ao gravar na planilha: {exc}")
+        return False
+
+
+def _aba_historico() -> None:
+    st.markdown(
+        '<div class="cl-boletim-head">'
+        '<span class="cl-boletim-head-title">Histórico</span>'
+        '<span class="cl-boletim-head-sub">Planilha comercial · pregões, contratos e aditivos (sincronizada)</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    try:
+        dados = _carregar_historico()
+    except Exception as exc:
+        st.error(
+            "Não consegui abrir a planilha comercial. Confirme que ela está compartilhada "
+            f"com {_SA_EMAIL} (como Editor). Detalhe técnico: {exc}"
+        )
+        return
+    if not dados:
+        st.info("A planilha comercial está vazia.")
+        return
+
+    # KPIs (aba PREGOES)
+    _preg_t = next((t for t in dados if "PREG" in t.upper()), None)
+    if _preg_t:
+        _, hdr, linhas = dados[_preg_t]
+        dfp = pd.DataFrame(linhas)
+        res = dfp.get("RESULTADO", pd.Series(dtype=str)).astype(str).str.upper().str.strip()
+        vit = int(res.str.startswith("VIT").sum())
+        der = int(res.str.startswith("DERROT").sum())
+        col_vol = next((c for c in dfp.columns if "CONTRATADO" in c.upper()), None)
+        vol = sum(_num_br_solto(v) for v in dfp[col_vol]) if col_vol is not None else 0
+        k1, k2, k3, k4 = st.columns(4)
+        k1.markdown(_card("Pregões registrados", f"{len(dfp)}"), unsafe_allow_html=True)
+        k2.markdown(_card("Vitórias", f"{vit}"), unsafe_allow_html=True)
+        k3.markdown(_card("Derrotas", f"{der}"), unsafe_allow_html=True)
+        k4.markdown(_card("Volume contratado (m³)", f"{int(vol):,}".replace(",", ".")), unsafe_allow_html=True)
+        st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
+    abas = list(dados.keys())
+    tabs = st.tabs([t.strip() for t in abas])
+    for tab, titulo in zip(tabs, abas):
+        with tab:
+            header_orig, header_limpo, linhas = dados[titulo]
+            df = pd.DataFrame(linhas)
+            _k = "".join(ch if ch.isalnum() else "_" for ch in titulo)
+            busca = st.text_input("Buscar", key=f"hist_busca_{_k}",
+                                  placeholder="cliente, nº do pregão, objeto…")
+            if busca and not df.empty:
+                mask = df.apply(lambda r: r.astype(str).str.contains(busca, case=False, na=False).any(), axis=1)
+                df = df[mask]
+            st.caption(f"{len(df)} registro(s) — mais recentes primeiro. Alterações feitas na planilha aparecem aqui em até 1 minuto.")
+            st.dataframe(df.iloc[::-1], width='stretch', hide_index=True)
+
+            with st.expander("Adicionar registro"):
+                with st.form(key=f"hist_form_{_k}"):
+                    valores: dict = {}
+                    cols = st.columns(2)
+                    for i, (orig, campo) in enumerate(zip(header_orig, header_limpo)):
+                        if not campo:
+                            continue
+                        cu = campo.upper()
+                        with cols[i % 2]:
+                            if "DATA" in cu or "VALIDADE" in cu:
+                                v = st.date_input(campo, value=None, format="DD/MM/YYYY",
+                                                  key=f"hf_{_k}_{i}")
+                                valores[campo] = v.strftime("%d/%m/%Y") if v else ""
+                            elif cu == "RESULTADO":
+                                valores[campo] = st.selectbox(
+                                    campo, ["", "VITÓRIA", "DERROTA", "DESERTO", "FRACASSADO", "EM ANDAMENTO"],
+                                    key=f"hf_{_k}_{i}")
+                            elif "TIPO DE PREG" in cu:
+                                valores[campo] = st.selectbox(
+                                    campo, ["", "PE", "PRESENCIAL", "DL"], key=f"hf_{_k}_{i}")
+                            elif cu == "EMPRESA":
+                                valores[campo] = st.text_input(campo, value="CONCRELAGOS CONCRETO LTDA",
+                                                               key=f"hf_{_k}_{i}")
+                            else:
+                                valores[campo] = st.text_input(campo, key=f"hf_{_k}_{i}")
+                    enviar = st.form_submit_button("Salvar na planilha", type="primary")
+                if enviar:
+                    linha = [valores.get(c, "") for c in header_limpo]
+                    if any(str(x).strip() for x in linha):
+                        if _adicionar_historico(titulo, linha):
+                            st.cache_data.clear()
+                            st.success("Registro adicionado à planilha.")
+                            st.rerun()
+                    else:
+                        st.warning("Preencha pelo menos um campo.")
+
+
+# =========================================================================
+# ANÁLISE DE EDITAIS — GEM do Gemini + agente interno, decisão e mensagens
+# =========================================================================
+GEM_ANALISE_URL = "https://gemini.google.com/gem/1R3_dEXWHLM0-cL8oHTxeMnPjurb1R-Bf"
+FISCAL_WHATSAPP = "5522997570806"
+_ANALISES_ABA = "Analises Editais"
+_ANALISES_HEADER = ["numero_controle_pncp", "data", "status", "dados_json"]
+
+_PROMPT_ANALISE = (
+    "Você é analista de licitações da Concrelagos (vende concreto usinado e brita). "
+    "Extraia do edital abaixo os dados do certame. Responda APENAS com JSON válido, sem markdown:\n"
+    '{"orgao": "ex: Prefeitura Municipal de Ubá/MG",\n'
+    ' "cidade_uf": "Cidade/UF",\n'
+    ' "limite_proposta": "DD/MM/AAAA às HH:MMh (horário de Brasília)",\n'
+    ' "inicio_disputa": "DD/MM/AAAA às HH:MMh (horário de Brasília)",\n'
+    ' "vigencia": "ex: 12 (doze) meses (validade da Ata de Registro de Preços)",\n'
+    ' "quantidade": "ex: 2.176 m³ de concreto usinado (FCK 15/20/25/30, convencional e bombeado)",\n'
+    ' "valor_maximo": "ex: R$ 1.812.711,68 no total",\n'
+    ' "objeto": "resumo fiel do objeto em 1-3 frases",\n'
+    ' "local_entrega": "onde os serviços/entregas ocorrerão",\n'
+    ' "dias_horario": "dias e horários de entrega",\n'
+    ' "volume_minimo": "volume mínimo por entrega (ex: 3,0 m³)",\n'
+    ' "riscos": "1-2 frases: exigências de habilitação/atestados/visita técnica ou outros pontos de atenção"}\n'
+    'Quando um dado não constar no texto, use "a confirmar no edital".\n\n'
+    "Edital (primeiros 12000 caracteres):\n"
+)
+
+
+def _gemini_gerar(prompt: str) -> str | None:
+    """Gera texto no Gemini (só modelos flash gratuitos; lite primeiro — mais cota)."""
+    client = _gemini_client()
+    if client is None:
+        st.error("GEMINI_API_KEY não configurada (Settings → Secrets → [gemini] api_key).")
+        return None
+    _pagos = ("pro", "ultra", "exp", "thinking", "vision", "tts", "audio", "image", "live", "embedding", "preview")
+
+    def _gratis(n: str) -> bool:
+        n = n.lower()
+        return "flash" in n and not any(p in n for p in _pagos)
+
+    modelos: list = []
+    try:
+        for m in client.models.list():
+            nome = (getattr(m, "name", "") or "").split("/")[-1]
+            acts = getattr(m, "supported_actions", None) or []
+            if nome and _gratis(nome) and ("generateContent" in acts or not acts):
+                modelos.append(nome)
+    except Exception:
+        pass
+    for c in ["gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]:
+        if c not in modelos and _gratis(c):
+            modelos.append(c)
+    modelos.sort(key=lambda m: 0 if "lite" in m else 1)
+
+    ultimo = ""
+    for modelo in modelos:
+        try:
+            r = client.models.generate_content(model=modelo, contents=prompt)
+            t = (getattr(r, "text", "") or "").strip()
+            if t:
+                return t
+        except Exception as exc:
+            ultimo = str(exc)
+            continue
+    st.warning("IA sem cota disponível agora (camada gratuita). Tente novamente mais tarde "
+               "ou use o botão do GEM no Gemini.")
+    if ultimo:
+        st.caption(f"Detalhe: {ultimo[:140]}")
+    return None
+
+
+def _analisar_edital_ia(num_controle: str, link_pdf: str, link_pncp: str) -> dict | None:
+    """Baixa o edital (PDF/HTML) e extrai os dados do certame com o Gemini."""
+    import json
+    with st.spinner("Baixando o edital e analisando com a IA..."):
+        texto = _baixar_texto_edital(num_controle, link_pdf, link_pncp)
+        if not texto or len(texto) < 100:
+            st.warning("Não consegui extrair o texto do edital (PDF escaneado ou sem download direto). "
+                       "Baixe o edital e use o GEM no Gemini.")
+            return None
+        raw = _gemini_gerar(_PROMPT_ANALISE + texto[:12000])
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rstrip("`").strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        st.warning("A IA respondeu em formato inesperado. Clique em Analisar novamente.")
+        return None
+
+
+def _salvar_analise(num_controle: str, status: str, dados: dict | None) -> None:
+    """Registra a análise/decisão na aba 'Analises Editais' (auditoria). Falha silenciosa."""
+    try:
+        import json
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = _get_or_create_worksheet(sh, _ANALISES_ABA, rows=2000, cols=len(_ANALISES_HEADER))
+        vals = ws.get_all_values()
+        if not vals:
+            ws.append_row(_ANALISES_HEADER, value_input_option="USER_ENTERED")
+        ws.append_row([
+            num_controle, datetime.now().isoformat(timespec="seconds"), status,
+            json.dumps(dados or {}, ensure_ascii=False)[:45000],
+        ], value_input_option="USER_ENTERED")
+    except Exception as exc:
+        st.toast(f"Não consegui registrar a análise: {exc}", icon="⚠️")
+
+
+def _g(dados: dict, chave: str) -> str:
+    v = str((dados or {}).get(chave) or "").strip()
+    return v if v else "a confirmar no edital"
+
+
+def _aba_analise(ed: pd.DataFrame) -> None:
+    import urllib.parse
+
+    st.markdown(
+        '<div class="cl-boletim-head">'
+        '<span class="cl-boletim-head-title">Análise de Editais</span>'
+        '<span class="cl-boletim-head-sub">IA lê o edital · decisão · mensagens prontas (regional e fiscal)</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    if ed.empty:
+        st.info("Nenhum edital na base ainda.")
+        return
+
+    # Só editais ainda abertos (pregão não ocorrido), mais relevantes primeiro
+    df = ed.copy()
+    _b = df["data_encerramento"] if ("data_encerramento" in df.columns and df["data_encerramento"].notna().any()) else df.get("data_abertura")
+    if _b is not None:
+        _bz = pd.to_datetime(_b, errors="coerce", utc=True)
+        df = df[_bz.isna() | (_bz >= pd.Timestamp.now(tz="UTC"))]
+    if df.empty:
+        st.info("Nenhum edital aberto no momento.")
+        return
+    df["_score_n"] = pd.to_numeric(df.get("score"), errors="coerce").fillna(0)
+    df = df.sort_values(["_score_n", "valor_estimado"], ascending=[False, False])
+
+    def _rotulo(i):
+        r = df.loc[i]
+        return (f"{r.get('numero_edital') or r.get('numero_controle_pncp')} · "
+                f"{r.get('municipio')}/{r.get('uf')} · {str(r.get('objeto'))[:70]}")
+
+    sel = st.selectbox("Edital para analisar", options=list(df.index), format_func=_rotulo)
+    d = df.loc[sel]
+    nc = str(d.get("numero_controle_pncp") or "")
+    link_origem = str(d.get("link_sistema_origem") or "")
+    link_pncp = str(d.get("link_pncp") or "")
+
+    b1, b2, b3 = st.columns([1.4, 1.2, 3])
+    with b1:
+        analisar = st.button("Analisar aqui (IA)", type="primary", width='stretch')
+    with b2:
+        st.link_button("Abrir GEM (Gemini)", GEM_ANALISE_URL, width='stretch')
+    if analisar:
+        res = _analisar_edital_ia(nc, link_origem, link_pncp)
+        if res:
+            st.session_state[f"anl_{nc}"] = res
+            _salvar_analise(nc, "analisado", res)
+
+    dados = st.session_state.get(f"anl_{nc}")
+    if not dados:
+        st.caption("Clique em Analisar para a IA extrair os dados do certame direto do edital.")
+        return
+
+    st.markdown("##### Dados do certame (extraídos pela IA)")
+    st.markdown(
+        f"**Órgão:** {_g(dados,'orgao')}  \n"
+        f"**Limite p/ proposta:** {_g(dados,'limite_proposta')} · **Disputa:** {_g(dados,'inicio_disputa')}  \n"
+        f"**Vigência:** {_g(dados,'vigencia')}  \n"
+        f"**Quantidade:** {_g(dados,'quantidade')} · **Valor máximo:** {_g(dados,'valor_maximo')}  \n"
+        f"**Local de entrega:** {_g(dados,'local_entrega')} · **Volume mínimo:** {_g(dados,'volume_minimo')}  \n"
+        f"**Pontos de atenção:** {_g(dados,'riscos')}"
+    )
+
+    dc1, dc2, _ = st.columns([1.2, 1.2, 3])
+    estado_key = f"anl_status_{nc}"
+    with dc1:
+        if st.button("Edital aprovado", width='stretch'):
+            st.session_state[estado_key] = "aprovado"
+            _salvar_analise(nc, "aprovado", dados)
+    with dc2:
+        if st.button("Edital reprovado", width='stretch'):
+            st.session_state[estado_key] = "reprovado"
+            _salvar_analise(nc, "reprovado", dados)
+
+    status = st.session_state.get(estado_key)
+    if status == "reprovado":
+        st.error("Edital marcado como REPROVADO (registrado na auditoria).")
+        return
+    if status != "aprovado":
+        return
+
+    st.success("Edital APROVADO — mensagens prontas abaixo.")
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
+    # ----- Mensagem ao regional -----
+    st.markdown("##### 1) Mensagem ao regional")
+    nome_regional = st.text_input("Nome do regional", placeholder="ex: João")
+    cidade_uf = _g(dados, "cidade_uf") if _g(dados, "cidade_uf") != "a confirmar no edital" else f"{d.get('municipio')}/{d.get('uf')}"
+    msg_regional = (
+        f"Bom dia {nome_regional or '(nome do regional)'}! Tudo bom?\n"
+        f"Encontramos uma licitação no Município de {cidade_uf}, me informe se atendemos lá, por favor? "
+        f"E se sim, qual a filial que irá participar, e também me informe o preço limite.\n"
+        f"Dados do Certame:\n"
+        f"1. Órgão solicitante: {_g(dados,'orgao')}.\n"
+        f"2. Limite para Envio da Proposta: {_g(dados,'limite_proposta')}.\n"
+        f"3. Início da Disputa (Lances): {_g(dados,'inicio_disputa')}.\n"
+        f"4. Prazo de vigência da contratação: {_g(dados,'vigencia')}.\n"
+        f"5. Quantidade Total Estimada: {_g(dados,'quantidade')}.\n"
+        f"6. Valor Estimado (Preço Máximo): {_g(dados,'valor_maximo')}.\n"
+        f"7. OBJETO: {_g(dados,'objeto')}.\n"
+        f"8. Local de Entrega: {_g(dados,'local_entrega')}.\n"
+        f"9. Dias e Horário de Entrega: {_g(dados,'dias_horario')}.\n"
+        f"10. Volume Mínimo por Entrega: {_g(dados,'volume_minimo')}."
+    )
+    st.code(msg_regional, language=None)
+    st.warning("Lembrete: anexar o PRINT DOS ITENS e o PDF DO EDITAL ao enviar a mensagem.")
+    if link_origem or link_pncp:
+        st.markdown(f"[Baixar edital]({link_origem or link_pncp})")
+    st.caption("Filial definida? Peça o cadastro de fornecedor no Claude com /cadastros-concrelagos.")
+
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
+    # ----- Mensagem ao fiscal (WhatsApp) -----
+    st.markdown("##### 2) Documentos ao fiscal")
+    filial_doc = st.text_input("Filial (para pedir a documentação)", placeholder="ex: Ubá")
+    try:
+        _data_preg = pd.to_datetime(d.get("data_abertura"), errors="coerce")
+        data_pregao = _data_preg.strftime("%d/%m") if pd.notna(_data_preg) else "a definir"
+    except Exception:
+        data_pregao = "a definir"
+    msg_fiscal = (
+        f"Bom dia, tudo bem? Vamos participar de uma licitação dia {data_pregao} em {cidade_uf}. "
+        f"Consegue me enviar essa documentação referente à filial de {filial_doc or '(filial)'}?\n"
+        f"1. Certidão Conjunta de Débitos Relativos a Tributos Federais e à Dívida Ativa da União.\n"
+        f"2. Certidão de Regularidade Estadual pertinente ao domicílio ou sede.\n"
+        f"3. Certidão de Regularidade Municipal pertinente ao domicílio ou sede.\n"
+        f"4. Certidão de Regularidade do FGTS.\n"
+        f"5. Certidão Negativa de Débitos Trabalhistas (CNDT).\n"
+        f"6. Certidão Negativa de Falência (emitida há no máximo 90 dias)."
+    )
+    st.code(msg_fiscal, language=None)
+    _wa = f"https://wa.me/{FISCAL_WHATSAPP}?text={urllib.parse.quote(msg_fiscal)}"
+    st.link_button("Abrir WhatsApp do fiscal com a mensagem pronta", _wa, width='stretch')
+    st.caption("O WhatsApp abre com a mensagem preenchida — confira e aperte enviar.")
+
+
 # ===== Main =====
 def main() -> None:
     if not _check_login():
@@ -1844,7 +2247,7 @@ def main() -> None:
 
     # Navegação por botões (controlável via código — permite que os KPIs do
     # Dashboard levem direto ao Boletim já filtrado). Ativo = dourado.
-    _PAGINAS = ["Dashboard", "Boletim", "Mapa", "Diário"]
+    _PAGINAS = ["Dashboard", "Boletim", "Mapa", "Histórico", "Análise", "Diário"]
     if "pagina" not in st.session_state:
         st.session_state["pagina"] = "Dashboard"
     _navc = st.columns(len(_PAGINAS))
@@ -1862,6 +2265,10 @@ def main() -> None:
         _aba_editais(ed)
     elif _pg == "Mapa":
         _aba_mapa(ed, fil)
+    elif _pg == "Histórico":
+        _aba_historico()
+    elif _pg == "Análise":
+        _aba_analise(ed)
     else:
         _aba_diario(ed, ultima)
 
