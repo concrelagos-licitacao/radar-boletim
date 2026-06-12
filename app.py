@@ -57,11 +57,29 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent
 LOGO_PATH = ROOT / "assets" / "logo.png"
 
+# Sol da Concrelagos (SVG inline, dourado) — substitui o "O" de CONCRELAGOS nos títulos,
+# como no logotipo oficial. Dimensionado como letra (0.95em) e alinhado à linha do texto.
+_SOL_RAIOS = "".join(
+    f'<line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate({a} 12 12)" />'
+    for a in range(0, 360, 30)
+)
+_SOL_SVG = (
+    '<svg viewBox="0 0 24 24" style="height:0.95em;width:0.95em;vertical-align:-0.1em;" '
+    'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+    '<circle cx="12" cy="12" r="4.7" fill="none" stroke="#C28E2C" stroke-width="2.6"/>'
+    f'<g stroke="#C28E2C" stroke-width="2.3" stroke-linecap="round">{_SOL_RAIOS}</g>'
+    '</svg>'
+)
+_TITULO_SOL = (
+    f'CONCRELAG{_SOL_SVG}S '
+    '<span style="opacity:0.88;font-size:0.82em;">INTELLIGENCE HUB</span>'
+)
+
 # ===== Styling corporativo =====
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Michroma&family=Inter:wght@400;500;600;700&display=swap');
     :root {
         --cl-primary: #3A4149;   /* grafite do logo Concrelagos */
         --cl-header:  #2E353D;    /* faixa escura (cabeçalho/login) */
@@ -79,19 +97,28 @@ st.markdown(
         --cl-shadow-2: 0 10px 28px rgba(35,40,46,0.13), 0 3px 8px rgba(35,40,46,0.06);
         --cl-glow-gold: 0 4px 16px rgba(194,142,44,0.32);
         --cl-radius: 13px;
-        --cl-font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+        --cl-font-display: 'Michroma', 'Segoe UI', sans-serif;  /* peso único 400, fonte larga */
         --cl-font-body: 'Inter', -apple-system, 'Segoe UI', sans-serif;
     }
-    .stApp, .stApp p, .stApp span, .stApp label, .stApp input, .stApp textarea,
+    /* Fonte do corpo — NUNCA em span genérico (quebraria a fonte de ícones do
+       Streamlit, fazendo ícones virarem texto tipo "double_arrow_right"). */
+    .stApp, .stApp p, .stApp label, .stApp input, .stApp textarea,
     .stMarkdown { font-family: var(--cl-font-body); }
+    /* Restaura a fonte dos ícones Material em qualquer contexto */
+    [data-testid="stIconMaterial"], .material-symbols-rounded,
+    [data-testid="stExpanderToggleIcon"], [data-testid^="stIcon"] {
+        font-family: 'Material Symbols Rounded' !important;
+    }
     .main { background-color: var(--cl-bg); }
     .stApp header { background-color: var(--cl-header); }
     .stApp header * { color: white !important; }
     .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-    /* Tipografia display (futurista, geométrica) */
-    h1, h2, h3, h4, h5 { color: var(--cl-primary); font-weight: 700;
-        font-family: var(--cl-font-display); letter-spacing: -0.01em; }
-    .cl-serif { font-family: var(--cl-font-display); }
+    /* Tipografia display (futurista — Michroma é larga e tem peso único 400) */
+    h1, h2, h3, h4, h5 { color: var(--cl-primary); font-weight: 400;
+        font-family: var(--cl-font-display); letter-spacing: 0.01em; }
+    h1 { font-size: 1.5rem; } h2 { font-size: 1.25rem; } h3 { font-size: 1.05rem; }
+    h4, h5 { font-size: 0.92rem; }
+    .cl-serif { font-family: var(--cl-font-display); font-weight: 400; }
     .cl-card {
         background: var(--cl-card);
         border: 1px solid #ECEEF1;
@@ -100,9 +127,11 @@ st.markdown(
         padding: 1.1rem 1.25rem;
         margin-bottom: 0.75rem;
         box-shadow: var(--cl-shadow-1);
-        transition: transform 0.18s ease, box-shadow 0.18s ease;
+        transition: transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-left-color 0.22s ease;
     }
-    .cl-card:hover { transform: translateY(-2px); box-shadow: var(--cl-shadow-2); }
+    .cl-card:hover { transform: translateY(-5px) scale(1.015);
+        box-shadow: var(--cl-shadow-2), var(--cl-glow-gold);
+        border-left-color: var(--cl-accent-d); }
     .cl-card-title {
         font-size: 0.72rem;
         text-transform: uppercase;
@@ -112,12 +141,12 @@ st.markdown(
         font-weight: 600;
     }
     .cl-card-value {
-        font-size: 1.85rem;
-        font-weight: 700;
+        font-size: 1.45rem;
+        font-weight: 400;
         color: var(--cl-accent-d);
-        line-height: 1.1;
+        line-height: 1.15;
         font-family: var(--cl-font-display);
-        letter-spacing: -0.02em;
+        letter-spacing: 0;
     }
     .cl-card-delta {
         font-size: 0.82rem;
@@ -266,7 +295,7 @@ st.markdown(
         justify-content: space-between;
         align-items: center;
     }
-    .cl-header-title { font-size: 1.45rem; font-weight: 700; }
+    .cl-header-title { font-size: 1.18rem; font-weight: 400; }
     .cl-header-sub   { font-size: 0.85rem; opacity: 0.85; }
     /* Cards lidos */
     .cl-edital-card-lido { opacity: 0.52; border-left: 4px solid #16A34A; }
@@ -296,8 +325,9 @@ st.markdown(
        DESIGN SYSTEM — futurista, profissional (grafite + dourado)
        ========================================================= */
     .cl-edital-card { border:1px solid #ECEEF1; border-radius:var(--cl-radius); box-shadow:var(--cl-shadow-1); margin-bottom:1.1rem; overflow:hidden;
-        transition: transform 0.18s ease, box-shadow 0.18s ease; }
-    .cl-edital-card:hover { transform: translateY(-2px); box-shadow: var(--cl-shadow-2); }
+        transition: transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease; }
+    .cl-edital-card:hover { transform: translateY(-4px) scale(1.008);
+        box-shadow: var(--cl-shadow-2), var(--cl-glow-gold); }
     .cl-edital-header { background:var(--cl-grad-dark) !important; padding:0.55rem 0.95rem !important; }
     .cl-hdr-left { display:flex; align-items:center; gap:0.45rem; }
     .cl-hdr-right { display:flex; align-items:center; gap:0.45rem; }
@@ -324,15 +354,15 @@ st.markdown(
     .cl-header-bar { background:var(--cl-grad-dark) !important; border-radius:var(--cl-radius) !important;
         border-bottom:3px solid var(--cl-accent) !important; margin-top:0 !important;
         box-shadow: var(--cl-shadow-1), 0 14px 30px -18px rgba(194,142,44,0.45); }
-    .cl-header-title { font-family:var(--cl-font-display); letter-spacing:0.005em; font-weight:700; }
+    .cl-header-title { font-family:var(--cl-font-display); letter-spacing:0.02em; font-weight:400; }
     .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #C28E2C; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
-    .cl-boletim-head-title { font-size:1.45rem; font-weight:700; color:#3A4149; font-family:var(--cl-font-display); letter-spacing:-0.01em; }
+    .cl-boletim-head-title { font-size:1.15rem; font-weight:400; color:#3A4149; font-family:var(--cl-font-display); letter-spacing:0.02em; }
     .cl-boletim-head-sub { font-size:0.84rem; color:#6B7280; }
     /* Botões — pílulas grafite com tipografia display; primary = gradiente dourado c/ glow */
     .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
-        border-radius:10px !important; font-weight:600 !important; font-size:0.8rem !important;
-        font-family:var(--cl-font-display) !important; letter-spacing:0.02em !important;
-        padding:0.3rem 0.75rem !important; min-height:0 !important;
+        border-radius:10px !important; font-weight:400 !important; font-size:0.72rem !important;
+        font-family:var(--cl-font-display) !important; letter-spacing:0.03em !important;
+        padding:0.32rem 0.75rem !important; min-height:0 !important;
         background:#3A4149 !important; border:1px solid #3A4149 !important;
         transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease !important;
     }
@@ -347,8 +377,8 @@ st.markdown(
         background:linear-gradient(135deg,#B5832700,#A9781F) #A9781F !important; border-color:#A9781F !important; }
     .stDownloadButton button, [data-testid="stDownloadButton"] button {
         background:var(--cl-grad-gold) !important; border:1px solid #C28E2C !important; border-radius:10px !important;
-        font-weight:600 !important; font-size:0.8rem !important; font-family:var(--cl-font-display) !important;
-        padding:0.3rem 0.75rem !important; box-shadow: var(--cl-glow-gold) !important;
+        font-weight:400 !important; font-size:0.72rem !important; font-family:var(--cl-font-display) !important;
+        padding:0.32rem 0.75rem !important; box-shadow: var(--cl-glow-gold) !important;
     }
     .stDownloadButton button * { color:#fff !important; }
     /* Popover "Mais filtros" — contorno discreto */
@@ -397,10 +427,10 @@ def _check_login() -> bool:
             st.image(str(LOGO_PATH), width='stretch')
 
     st.markdown(
-        """
+        f"""
         <div class="cl-header-bar" style="justify-content:center;text-align:center;">
             <div>
-                <div class="cl-header-title">Concrelagos Intelligence Hub</div>
+                <div class="cl-header-title">{_TITULO_SOL}</div>
                 <div class="cl-header-sub">Rastreador autônomo de licitações públicas — acesso restrito</div>
             </div>
         </div>
@@ -1935,12 +1965,35 @@ def _aba_historico() -> None:
         k4.markdown(_card("Volume contratado (m³)", f"{int(vol):,}".replace(",", ".")), unsafe_allow_html=True)
         st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
 
-        # ----- Gráficos (Altair, paleta Concrelagos) -----
+        # ----- Gráficos (Altair, cores oficiais das logos de cada empresa) -----
         import altair as alt
         dfp["_res2"] = res.apply(lambda x: "VITÓRIA" if x.startswith("VIT")
                                  else ("DERROTA" if x.startswith("DERROT") else "OUTROS"))
         dfp["_ano"] = pd.to_numeric(dfp.get("ANO"), errors="coerce")
         dfp["_vol"] = dfp[col_vol].apply(_num_br_solto) if col_vol is not None else 0.0
+        col_valor = next((c for c in dfp.columns if "VALOR TOTAL" in c.upper()), None)
+        dfp["_valor"] = dfp[col_valor].apply(_num_br_solto) if col_valor is not None else 0.0
+
+        # Empresa → nome curto + cor da logo (Apolo vermelho, Outeiro âmbar,
+        # Bangu vinho, IPEPAM laranja, Imboassica grafite, Concrelagos dourado)
+        def _map_emp(nome: str) -> str:
+            n = str(nome or "").upper()
+            if "CONCRELAGOS" in n: return "Concrelagos"
+            if "IMBOASSICA" in n: return "Pedreira Imboassica"
+            if "APOLO" in n: return "Apolo"
+            if "OUTEIRO" in n: return "Pedreira Outeiro"
+            if "BANGU" in n: return "Pedreira Bangu"
+            if "IPEPAM" in n: return "IPEPAM"
+            return "Outras"
+        dfp["_emp"] = dfp.get("EMPRESA", pd.Series([""] * len(dfp))).astype(str).map(_map_emp)
+        _EMP_DOMINIO = ["Concrelagos", "Pedreira Imboassica", "Apolo",
+                        "Pedreira Outeiro", "Pedreira Bangu", "IPEPAM", "Outras"]
+        _EMP_CORES = ["#C28E2C", "#3A4149", "#D32F2F", "#F2A900", "#8E2430", "#F39C12", "#9AA0A6"]
+        _esc_emp = alt.Scale(domain=_EMP_DOMINIO, range=_EMP_CORES)
+        # Eixo numérico em PT-BR compacto ("200 mil", "1,2 mi")
+        _LBL_PTBR = ("datum.value >= 1000000 ? replace(format(datum.value/1000000, '.1f'), '.', ',') + ' mi' : "
+                     "datum.value >= 1000 ? format(datum.value/1000, '.0f') + ' mil' : format(datum.value, '.0f')")
+
         ga = dfp.dropna(subset=["_ano"]).copy()
         if not ga.empty:
             ga["_ano"] = ga["_ano"].astype(int)
@@ -1987,22 +2040,18 @@ def _aba_historico() -> None:
 
         gcol3, gcol4 = st.columns([1.3, 1])
         with gcol3:
-            st.markdown("##### Volume contratado (m³) por ano")
+            st.markdown("##### Volume contratado (m³) por ano — por empresa")
             if not ga.empty:
-                va = ga.groupby("_ano")["_vol"].sum().reset_index()
-                area = alt.Chart(va).mark_area(
-                    interpolate="monotone",
-                    line={"color": "#C28E2C", "strokeWidth": 2.5},
-                    color=alt.Gradient(gradient="linear",
-                                       stops=[alt.GradientStop(color="#FBF3E3", offset=0),
-                                              alt.GradientStop(color="#C28E2C", offset=1)],
-                                       x1=1, x2=1, y1=1, y2=0),
-                ).encode(
+                va = ga.groupby(["_ano", "_emp"])["_vol"].sum().reset_index()
+                vol_bar = alt.Chart(va).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
                     x=alt.X("_ano:O", title=None, axis=alt.Axis(labelAngle=0)),
-                    y=alt.Y("_vol:Q", title=None),
-                    tooltip=[alt.Tooltip("_ano:O", title="ano"), alt.Tooltip("_vol:Q", title="m³", format=",.0f")],
-                ).properties(height=240)
-                st.altair_chart(area, width='stretch')
+                    y=alt.Y("_vol:Q", title=None, axis=alt.Axis(labelExpr=_LBL_PTBR)),
+                    color=alt.Color("_emp:N", scale=_esc_emp,
+                                    legend=alt.Legend(orient="bottom", title=None, columns=4)),
+                    tooltip=[alt.Tooltip("_ano:O", title="ano"), alt.Tooltip("_emp:N", title="empresa"),
+                             alt.Tooltip("_vol:Q", title="m³", format=",.0f")],
+                ).properties(height=250)
+                st.altair_chart(vol_bar, width='stretch')
         with gcol4:
             st.markdown("##### Top clientes por volume (m³)")
             if "CLIENTE" in dfp.columns:
@@ -2010,11 +2059,25 @@ def _aba_historico() -> None:
                        .groupby("_cli")["_vol"].sum().nlargest(8).reset_index())
                 top.columns = ["cliente", "vol"]
                 hbar = alt.Chart(top).mark_bar(cornerRadiusEnd=4, color="#C28E2C").encode(
-                    x=alt.X("vol:Q", title=None),
+                    x=alt.X("vol:Q", title=None, axis=alt.Axis(labelExpr=_LBL_PTBR)),
                     y=alt.Y("cliente:N", sort="-x", title=None, axis=alt.Axis(labelLimit=190)),
                     tooltip=[alt.Tooltip("cliente:N"), alt.Tooltip("vol:Q", format=",.0f")],
-                ).properties(height=240)
+                ).properties(height=250)
                 st.altair_chart(hbar, width='stretch')
+
+        st.markdown("##### Valor contratado (R$) por ano — por empresa")
+        if not ga.empty:
+            vr = ga.groupby(["_ano", "_emp"])["_valor"].sum().reset_index()
+            val_bar = alt.Chart(vr).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                x=alt.X("_ano:O", title=None, axis=alt.Axis(labelAngle=0)),
+                y=alt.Y("_valor:Q", title=None,
+                        axis=alt.Axis(labelExpr="'R$ ' + (" + _LBL_PTBR + ")")),
+                color=alt.Color("_emp:N", scale=_esc_emp,
+                                legend=alt.Legend(orient="bottom", title=None, columns=4)),
+                tooltip=[alt.Tooltip("_ano:O", title="ano"), alt.Tooltip("_emp:N", title="empresa"),
+                         alt.Tooltip("_valor:Q", title="R$", format=",.2f")],
+            ).properties(height=250)
+            st.altair_chart(val_bar, width='stretch')
 
     # ----- Contratos a vencer (aba GANHAS) — radar de renovação/aditivo -----
     _ganhas_t = next((t for t in dados if "GANHAS" in t.upper()), None)
@@ -2138,8 +2201,13 @@ _PROMPT_ANALISE = (
 )
 
 
-def _gemini_gerar(prompt: str) -> str | None:
-    """Gera texto no Gemini (só modelos flash gratuitos; lite primeiro — mais cota)."""
+def _gemini_gerar(prompt: str, qualidade: bool = True) -> str | None:
+    """Gera texto no Gemini (só modelos flash gratuitos — custo zero).
+
+    qualidade=True  → tenta os flash MAIS CAPAZES primeiro (2.5 → 2.0 → lite):
+                      usado na análise de edital e no chat do agente.
+    qualidade=False → lite primeiro (cota maior), p/ tarefas simples.
+    """
     client = _gemini_client()
     if client is None:
         st.error("GEMINI_API_KEY não configurada (Settings → Secrets → [gemini] api_key).")
@@ -2159,10 +2227,18 @@ def _gemini_gerar(prompt: str) -> str | None:
                 modelos.append(nome)
     except Exception:
         pass
-    for c in ["gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]:
+    for c in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest",
+              "gemini-2.0-flash-lite", "gemini-flash-lite-latest"]:
         if c not in modelos and _gratis(c):
             modelos.append(c)
-    modelos.sort(key=lambda m: 0 if "lite" in m else 1)
+    if qualidade:
+        def _peso(m: str) -> int:
+            if "2.5" in m and "lite" not in m: return 0
+            if "lite" not in m: return 1
+            return 2
+        modelos.sort(key=_peso)
+    else:
+        modelos.sort(key=lambda m: 0 if "lite" in m else 1)
 
     ultimo = ""
     for modelo in modelos:
@@ -2174,23 +2250,25 @@ def _gemini_gerar(prompt: str) -> str | None:
         except Exception as exc:
             ultimo = str(exc)
             continue
-    st.warning("IA sem cota disponível agora (camada gratuita). Tente novamente mais tarde "
-               "ou use o botão do GEM no Gemini.")
+    st.warning("IA sem cota disponível agora (camada gratuita). Tente novamente em alguns minutos.")
     if ultimo:
         st.caption(f"Detalhe: {ultimo[:140]}")
     return None
 
 
 def _analisar_edital_ia(num_controle: str, link_pdf: str, link_pncp: str) -> dict | None:
-    """Baixa o edital (PDF/HTML) e extrai os dados do certame com o Gemini."""
+    """Baixa o edital (PDF/HTML) e extrai o dossiê do certame com o agente LICITAÇÕES."""
     import json
-    with st.spinner("Baixando o edital e analisando com a IA..."):
-        texto = _baixar_texto_edital(num_controle, link_pdf, link_pncp)
+    with st.spinner("Baixando o edital e analisando com o agente LICITAÇÕES..."):
+        texto = st.session_state.get(f"txt_{num_controle}")
+        if not texto:
+            texto = _baixar_texto_edital(num_controle, link_pdf, link_pncp)
+            st.session_state[f"txt_{num_controle}"] = texto or ""
         if not texto or len(texto) < 100:
             st.warning("Não consegui extrair o texto do edital (PDF escaneado ou sem download direto). "
-                       "Baixe o edital e use o GEM no Gemini.")
+                       "Coloque o PDF na pasta da licitação no Dropbox que eu leio de lá.")
             return None
-        raw = _gemini_gerar(_PROMPT_ANALISE + texto[:40000])
+        raw = _gemini_gerar(_PROMPT_ANALISE + texto[:40000], qualidade=True)
     if not raw:
         return None
     if raw.startswith("```"):
@@ -2223,9 +2301,258 @@ def _salvar_analise(num_controle: str, status: str, dados: dict | None) -> None:
         st.toast(f"Não consegui registrar a análise: {exc}", icon="⚠️")
 
 
+_PROMPT_CHAT = (
+    "Você é o LICITAÇÕES, o melhor analista de licitações do Brasil, especialista sênior da "
+    "Concrelagos Concreto S/A (fornecedora de concreto usinado e brita). Você está em uma CONVERSA "
+    "com a equipe jurídica sobre um edital específico (texto e análise abaixo).\n\n"
+    "Como agir:\n"
+    "- Responda em português, com precisão técnica e citando o ITEM do edital que fundamenta cada resposta.\n"
+    "- Se pedirem MODELO/MINUTA de declaração (ME/EPP, inidoneidade, fato superveniente, menor aprendiz, "
+    "proposta independente, etc.), gere a minuta COMPLETA e pronta para uso, no padrão de licitações públicas, "
+    "com os dados da empresa que constarem e [CAMPOS ENTRE COLCHETES] para o que faltar.\n"
+    "- Se pedirem questionamento ou impugnação, redija a minuta formal endereçada ao pregoeiro.\n"
+    "- Quando a resposta depender de algo que não está no edital, diga claramente e sugira como confirmar.\n"
+    "- Seja direto: nada de rodeios; rigor de quem não deixa a empresa ser inabilitada.\n"
+)
+
+
+def _chat_licitacoes(nc: str, link_pdf: str, link_pncp: str, analise: dict, historico: list) -> str | None:
+    """Um turno do chat com o agente: contexto completo (edital + análise + docs da pasta)
+    + transcrição da conversa → resposta do LICITAÇÕES (qualidade-first)."""
+    import json
+    texto = st.session_state.get(f"txt_{nc}")
+    if not texto:
+        texto = _baixar_texto_edital(nc, link_pdf, link_pncp)
+        st.session_state[f"txt_{nc}"] = texto or ""
+    docs_ctx = st.session_state.get(f"docsctx_{nc}", "")
+    transcricao = "\n".join(
+        ("USUÁRIO: " if m["role"] == "user" else "LICITAÇÕES: ") + m["content"]
+        for m in historico[-12:]
+    )
+    prompt = (
+        _PROMPT_CHAT
+        + "\n=== ANÁLISE JÁ FEITA (JSON) ===\n" + json.dumps(analise or {}, ensure_ascii=False)[:6000]
+        + "\n\n=== EDITAL (texto extraído) ===\n" + (texto or "(texto do edital indisponível)")[:40000]
+        + (("\n\n=== DOCUMENTOS DA PASTA DA LICITAÇÃO ===\n" + docs_ctx[:20000]) if docs_ctx else "")
+        + "\n\n=== CONVERSA ===\n" + transcricao
+        + "\nLICITAÇÕES:"
+    )
+    return _gemini_gerar(prompt, qualidade=True)
+
+
 def _g(dados: dict, chave: str) -> str:
     v = str((dados or {}).get(chave) or "").strip()
     return v if v else "a confirmar no edital"
+
+
+# =========================================================================
+# PASTA DO DROPBOX (08 - Licitações\LICITAÇÕES) + CHECAGEM DE HABILITAÇÃO
+# Lê direto do disco quando a pasta existe (Dropbox sincronizado em todas as
+# máquinas do setor). Sem pasta (ex.: hospedagem na nuvem) → upload manual.
+# =========================================================================
+def _licitacoes_dir() -> Path | None:
+    candidatos = [
+        Path(r"C:\Users\CONCRELAGOS\Dropbox\BIBLIOTECA JURIDICA - GERAL\CONCRELAGOS\08 - Licitações\LICITAÇÕES"),
+        Path.home() / "Dropbox" / "BIBLIOTECA JURIDICA - GERAL" / "CONCRELAGOS" / "08 - Licitações" / "LICITAÇÕES",
+    ]
+    for p in candidatos:
+        try:
+            if p.exists():
+                return p
+        except OSError:
+            continue
+    return None
+
+
+def _norm_txt(s) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
+    return " ".join(s.lower().split())
+
+
+def _achar_pasta_licitacao(base: Path, municipio: str, uf: str):
+    """Melhor match de 'LICITAÇÃO - <MUNICÍPIO> <UF>' (tolerante a hífens/espaços)."""
+    alvo = _norm_txt(municipio)
+    if not alvo:
+        return None
+    melhor = None
+    for p in base.iterdir():
+        if not p.is_dir():
+            continue
+        n = _norm_txt(p.name)
+        if alvo in n:
+            if uf and _norm_txt(uf) in n.split():
+                return p
+            melhor = melhor or p
+    return melhor
+
+
+def _pdf_texto_bytes(dados_b: bytes, paginas: int = 6) -> str:
+    import io
+    import pdfplumber
+    try:
+        with pdfplumber.open(io.BytesIO(dados_b)) as pdf:
+            return "\n".join((pg.extract_text() or "") for pg in pdf.pages[:paginas]).strip()
+    except Exception:
+        return ""
+
+
+def _ler_docs_pasta(pasta: Path, max_arq: int = 15, max_chars: int = 28000):
+    """Lê os PDFs da pasta (recursivo). Retorna (contexto_p_ia, nomes)."""
+    try:
+        pdfs = sorted(pasta.rglob("*.pdf"))[:max_arq]
+    except OSError:
+        return "", []
+    partes, nomes, total = [], [], 0
+    for f in pdfs:
+        try:
+            rel = str(f.relative_to(pasta))
+        except ValueError:
+            rel = f.name
+        nomes.append(rel)
+        if total >= max_chars:
+            partes.append(f"--- ARQUIVO: {rel} --- (texto omitido por limite)")
+            continue
+        txt = _pdf_texto_bytes(f.read_bytes(), paginas=6)
+        trecho = txt[: max(0, min(4000, max_chars - total))]
+        total += len(trecho)
+        partes.append(f"--- ARQUIVO: {rel} ---\n{trecho or '(sem texto extraível — possivelmente escaneado)'}")
+    return "\n\n".join(partes), nomes
+
+
+_PROMPT_HAB = (
+    "Você é o LICITAÇÕES, o melhor analista de licitações do Brasil (Concrelagos — concreto usinado e brita). "
+    "Sua tarefa: conferir, exigência por exigência, se os DOCUMENTOS DISPONÍVEIS cobrem as EXIGÊNCIAS DE "
+    "HABILITAÇÃO do edital. Hoje é {HOJE}; a sessão do pregão é em {SESSAO}. Os NOMES dos arquivos costumam "
+    "indicar o tipo e a validade (ex.: 'CERTIDAO FEDERAL - VENC 21-05-2024.pdf'): considere VENCIDO todo "
+    "documento cuja validade termine antes da sessão. Não deixe passar NADA que possa inabilitar.\n"
+    "Responda APENAS com JSON válido, sem markdown:\n"
+    '{"mapeamento": [{"item_edital": "8.1", "exigencia": "nome curto", '
+    '"documento": "arquivo.pdf que atende, ou FALTANTE", "status": "ok|vencido|incompleto|faltante", '
+    '"obs": "1 frase curta quando necessário"}],\n'
+    ' "faltantes": [{"item_edital": "8.3", "exigencia": "ATA", "como_resolver": "onde/como obter ou gerar"}],\n'
+    ' "habilitado_100": true|false,\n'
+    ' "observacoes": ["alertas gerais (validades próximas, autenticação, assinatura, etc.)"]}\n'
+)
+
+
+def _verificar_habilitacao(d, analise: dict, docs_ctx: str) -> dict | None:
+    import json
+    data_sessao = _fmt_data(d.get("data_abertura"))
+    docs_exig = (analise or {}).get("documentos") or {}
+    prompt = (
+        _PROMPT_HAB.replace("{HOJE}", datetime.now().strftime("%d/%m/%Y")).replace("{SESSAO}", str(data_sessao))
+        + "\n=== EXIGÊNCIAS DO EDITAL (extraídas pela análise) ===\n"
+        + json.dumps(docs_exig, ensure_ascii=False)[:12000]
+        + "\n\n=== DOCUMENTOS DISPONÍVEIS ===\n" + (docs_ctx or "(nenhum documento carregado)")[:30000]
+    )
+    raw = _gemini_gerar(prompt, qualidade=True)
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rstrip("`").strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        st.warning("A IA respondeu em formato inesperado — clique em Verificar novamente.")
+        return None
+
+
+def _secao_habilitacao(nc: str, d, dados: dict) -> None:
+    """Seção 'Habilitação': documentos da pasta do Dropbox (ou upload) + checagem 8.x."""
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+    st.markdown("##### Habilitação — documentos da pasta da licitação")
+    base = _licitacoes_dir()
+
+    if base:
+        pastas = sorted(p.name for p in base.iterdir() if p.is_dir())
+        sugestao = _achar_pasta_licitacao(base, str(d.get("municipio") or ""), str(d.get("uf") or ""))
+        opcoes = ["(selecione a pasta)"] + pastas
+        _pre = (pastas.index(sugestao.name) + 1) if (sugestao and sugestao.name in pastas) else 0
+        esc = st.selectbox("Pasta da licitação (Dropbox)", opcoes, index=_pre, key=f"pasta_{nc}")
+        if esc != "(selecione a pasta)":
+            pasta_lic = base / esc
+            subs = sorted(p.name for p in pasta_lic.iterdir() if p.is_dir())
+            if subs:
+                sub_esc = st.selectbox("Subpasta do pregão", ["(pasta inteira)"] + subs,
+                                       index=1 if len(subs) == 1 else 0, key=f"sub_{nc}")
+                alvo = pasta_lic / sub_esc if sub_esc != "(pasta inteira)" else pasta_lic
+            else:
+                alvo = pasta_lic
+            fil_dir = base / "DOCUMENTAÇÃO FILIAIS"
+            fil_esc = "(nenhuma)"
+            if fil_dir.exists():
+                fils = sorted(p.name for p in fil_dir.iterdir() if p.is_dir())
+                fil_esc = st.selectbox("Certidões da filial (DOCUMENTAÇÃO FILIAIS)",
+                                       ["(nenhuma)"] + fils, key=f"fil_{nc}")
+            b1, b2 = st.columns([1.7, 1.3])
+            with b1:
+                if st.button("Carregar documentos da pasta", key=f"ld_{nc}", width='stretch'):
+                    with st.spinner("Lendo os PDFs da pasta…"):
+                        ctx, nomes = _ler_docs_pasta(alvo)
+                        if fil_esc != "(nenhuma)":
+                            ctx2, n2 = _ler_docs_pasta(fil_dir / fil_esc, max_arq=10, max_chars=12000)
+                            ctx += f"\n\n=== CERTIDÕES DA FILIAL {fil_esc} ===\n" + ctx2
+                            nomes += [f"FILIAL/{x}" for x in n2]
+                    st.session_state[f"docsctx_{nc}"] = ctx
+                    st.session_state[f"docsnomes_{nc}"] = nomes
+            with b2:
+                if st.button("Abrir pasta no Explorer", key=f"op_{nc}", width='stretch'):
+                    try:
+                        os.startfile(str(alvo))
+                    except Exception:
+                        st.toast("Não consegui abrir o Explorer.", icon="⚠️")
+    else:
+        st.info("Pasta do Dropbox não visível neste servidor — anexe os PDFs abaixo, ou use o app "
+                "numa máquina do setor (com Dropbox) para leitura automática da pasta.")
+        ups = st.file_uploader("Documentos de habilitação (PDF)", accept_multiple_files=True,
+                               type=["pdf"], key=f"up_{nc}")
+        if ups:
+            partes, nomes, tot = [], [], 0
+            for u in ups[:15]:
+                t = _pdf_texto_bytes(u.getvalue(), paginas=6)
+                trecho = t[:4000]
+                tot += len(trecho)
+                nomes.append(u.name)
+                partes.append(f"--- ARQUIVO: {u.name} ---\n{trecho or '(sem texto extraível)'}")
+                if tot > 28000:
+                    break
+            st.session_state[f"docsctx_{nc}"] = "\n\n".join(partes)
+            st.session_state[f"docsnomes_{nc}"] = nomes
+
+    nomes = st.session_state.get(f"docsnomes_{nc}") or []
+    if nomes:
+        st.caption(f"{len(nomes)} documento(s) carregado(s): " + " · ".join(nomes[:8])
+                   + (" …" if len(nomes) > 8 else ""))
+        if st.button("Verificar habilitação", type="primary", key=f"vh_{nc}"):
+            with st.spinner("Conferindo exigência por exigência (8.1, 8.2, …)…"):
+                vh = _verificar_habilitacao(d, dados, st.session_state.get(f"docsctx_{nc}", ""))
+            if vh:
+                st.session_state[f"hab_{nc}"] = vh
+        vh = st.session_state.get(f"hab_{nc}")
+        if vh:
+            if vh.get("habilitado_100"):
+                st.success("**100% HABILITADOS** — todos os documentos cobrem as exigências do edital.")
+            mapa = vh.get("mapeamento") or []
+            if mapa:
+                _ic = {"ok": "✓ OK", "vencido": "VENCIDO", "incompleto": "INCOMPLETO", "faltante": "FALTANTE"}
+                st.markdown("\n".join(
+                    f"- **{m.get('item_edital', '?')} – {m.get('exigencia', '')}** → "
+                    f"{m.get('documento', '')} **[{_ic.get(str(m.get('status', '')).lower(), m.get('status', ''))}]**"
+                    + (f" — {m.get('obs')}" if m.get("obs") else "")
+                    for m in mapa if isinstance(m, dict)
+                ))
+            falt = [f for f in (vh.get("faltantes") or []) if isinstance(f, dict)]
+            if falt:
+                st.error("**Documentos FALTANTES:**\n\n" + "\n".join(
+                    f"- **{f.get('item_edital', '?')} – {f.get('exigencia', '')}** — {f.get('como_resolver', '')}"
+                    for f in falt))
+            obs = [str(o) for o in (vh.get("observacoes") or []) if str(o or "").strip()]
+            if obs:
+                st.info("\n".join(f"- {o}" for o in obs))
 
 
 def _aba_analise(ed: pd.DataFrame) -> None:
@@ -2361,6 +2688,33 @@ def _aba_analise(ed: pd.DataFrame) -> None:
         st.info("**Questionamentos sugeridos ao órgão:**\n\n" +
                 "\n".join(f"- {q}" for q in quests))
 
+    # ----- Documentos da pasta + checagem de habilitação -----
+    _secao_habilitacao(nc, d, dados)
+
+    # ----- Chat com o agente LICITAÇÕES -----
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+    st.markdown("##### Converse com o LICITAÇÕES")
+    st.caption("Pergunte sobre o edital, peça minutas de declarações que faltarem, "
+               "questionamentos ou impugnações — ele responde com base no edital completo.")
+    _ck = f"chat_{nc}"
+    if _ck not in st.session_state:
+        st.session_state[_ck] = []
+    for _m in st.session_state[_ck]:
+        with st.chat_message(_m["role"]):
+            st.markdown(_m["content"])
+    _perg = st.chat_input("Escreva sua pergunta ou pedido ao agente…", key=f"ci_{nc}")
+    if _perg:
+        st.session_state[_ck].append({"role": "user", "content": _perg})
+        with st.chat_message("user"):
+            st.markdown(_perg)
+        with st.chat_message("assistant"):
+            with st.spinner("O LICITAÇÕES está analisando…"):
+                _resp = _chat_licitacoes(nc, link_origem, link_pncp, dados, st.session_state[_ck])
+            st.markdown(_resp or "Sem cota de IA neste momento — tente novamente em alguns minutos.")
+        if _resp:
+            st.session_state[_ck].append({"role": "assistant", "content": _resp})
+
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
     dc1, dc2, _ = st.columns([1.2, 1.2, 3])
     estado_key = f"anl_status_{nc}"
     with dc1:
@@ -2463,7 +2817,7 @@ def main() -> None:
         f"""
         <div class="cl-header-bar">
             <div>
-                <div class="cl-header-title">Concrelagos Intelligence Hub</div>
+                <div class="cl-header-title">{_TITULO_SOL}</div>
                 <div class="cl-header-sub">Rastreador autônomo de licitações públicas — PNCP</div>
             </div>
             <div style="text-align:right;">

@@ -703,10 +703,17 @@ def filtrar_por_keyword_estado_valor(editais: list[dict]) -> list[dict]:
 
         matched = False
 
+        # Veto absoluto de ASFALTO para o ramo do concreto: "concreto betuminoso
+        # usinado a quente (CBUQ)" contém "concreto ... usinado" e enganaria o
+        # filtro — mas asfalto NÃO é nosso. (A brita segue avaliada normalmente:
+        # vender brita PARA usina de asfalto é venda de brita.)
+        _eh_asfalto = any(x in objeto_norm for x in
+                          ("betuminoso", "cbuq", "asfaltic", "asfalto", "massa asfaltica"))
+
         # Regra 2 — CONCRETO USINADO (qualquer UF do órgão; a GEOGRAFIA decide depois
         # pelo LOCAL DA OBRA — assim órgãos estaduais/federais com sede longe não
         # são barrados aqui).
-        if True:
+        if not _eh_asfalto:
             hit, score = None, 0
             if hit_concreto_forte:
                 hit, score = hit_concreto_forte, 3
