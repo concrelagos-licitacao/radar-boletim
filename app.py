@@ -61,6 +61,7 @@ LOGO_PATH = ROOT / "assets" / "logo.png"
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
     :root {
         --cl-primary: #3A4149;   /* grafite do logo Concrelagos */
         --cl-header:  #2E353D;    /* faixa escura (cabeçalho/login) */
@@ -72,37 +73,51 @@ st.markdown(
         --cl-muted:   #6B7280;
         --cl-success: #16A34A;
         --cl-danger:  #DC2626;
+        --cl-grad-dark: linear-gradient(135deg, #343B43 0%, #23282E 100%);
+        --cl-grad-gold: linear-gradient(135deg, #C28E2C 0%, #A9781F 100%);
+        --cl-shadow-1: 0 1px 3px rgba(35,40,46,0.07), 0 1px 2px rgba(35,40,46,0.04);
+        --cl-shadow-2: 0 10px 28px rgba(35,40,46,0.13), 0 3px 8px rgba(35,40,46,0.06);
+        --cl-glow-gold: 0 4px 16px rgba(194,142,44,0.32);
+        --cl-radius: 13px;
+        --cl-font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+        --cl-font-body: 'Inter', -apple-system, 'Segoe UI', sans-serif;
     }
+    .stApp, .stApp p, .stApp span, .stApp label, .stApp input, .stApp textarea,
+    .stMarkdown { font-family: var(--cl-font-body); }
     .main { background-color: var(--cl-bg); }
     .stApp header { background-color: var(--cl-header); }
     .stApp header * { color: white !important; }
     .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-    /* Títulos serifados (identidade Portfólio) */
-    h1, h2, h3 { color: var(--cl-primary); font-weight: 700;
-        font-family: Georgia, 'Times New Roman', serif; }
-    .cl-serif { font-family: Georgia, 'Times New Roman', serif; }
+    /* Tipografia display (futurista, geométrica) */
+    h1, h2, h3, h4, h5 { color: var(--cl-primary); font-weight: 700;
+        font-family: var(--cl-font-display); letter-spacing: -0.01em; }
+    .cl-serif { font-family: var(--cl-font-display); }
     .cl-card {
         background: var(--cl-card);
-        border: 1px solid #E5E7EB;
+        border: 1px solid #ECEEF1;
         border-left: 4px solid var(--cl-accent);
-        border-radius: 8px;
+        border-radius: var(--cl-radius);
         padding: 1.1rem 1.25rem;
         margin-bottom: 0.75rem;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        box-shadow: var(--cl-shadow-1);
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
     }
+    .cl-card:hover { transform: translateY(-2px); box-shadow: var(--cl-shadow-2); }
     .cl-card-title {
-        font-size: 0.78rem;
+        font-size: 0.72rem;
         text-transform: uppercase;
         color: var(--cl-muted);
         margin-bottom: 0.3rem;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.09em;
+        font-weight: 600;
     }
     .cl-card-value {
-        font-size: 1.7rem;
+        font-size: 1.85rem;
         font-weight: 700;
         color: var(--cl-accent-d);
         line-height: 1.1;
-        font-family: Georgia, 'Times New Roman', serif;
+        font-family: var(--cl-font-display);
+        letter-spacing: -0.02em;
     }
     .cl-card-delta {
         font-size: 0.82rem;
@@ -278,62 +293,84 @@ st.markdown(
     }
 
     /* =========================================================
-       OVERRIDE VISUAL — modelo ConLicitação (tema claro + verde)
+       DESIGN SYSTEM — futurista, profissional (grafite + dourado)
        ========================================================= */
-    .cl-edital-card { border:1px solid #E6E8EB; border-radius:10px; box-shadow:0 2px 10px rgba(16,42,71,0.08); margin-bottom:1.1rem; }
-    .cl-edital-header { background:#2D323B !important; padding:0.5rem 0.9rem !important; }
+    .cl-edital-card { border:1px solid #ECEEF1; border-radius:var(--cl-radius); box-shadow:var(--cl-shadow-1); margin-bottom:1.1rem; overflow:hidden;
+        transition: transform 0.18s ease, box-shadow 0.18s ease; }
+    .cl-edital-card:hover { transform: translateY(-2px); box-shadow: var(--cl-shadow-2); }
+    .cl-edital-header { background:var(--cl-grad-dark) !important; padding:0.55rem 0.95rem !important; }
     .cl-hdr-left { display:flex; align-items:center; gap:0.45rem; }
     .cl-hdr-right { display:flex; align-items:center; gap:0.45rem; }
-    .cl-edital-num { background:#C28E2C !important; color:#fff !important; min-width:26px !important; height:26px !important; width:auto !important; padding:0 0.45rem; border-radius:13px !important; font-size:0.82rem; }
-    .cl-hdr-icon { width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,0.16); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.82rem; }
+    .cl-edital-num { background:var(--cl-grad-gold) !important; color:#fff !important; min-width:26px !important; height:26px !important; width:auto !important; padding:0 0.5rem; border-radius:999px !important; font-size:0.8rem; font-family:var(--cl-font-display); font-weight:700; }
+    .cl-hdr-icon { width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,0.14); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:0.82rem; transition: background 0.15s ease; }
     .cl-hdr-icon.on-fav  { background:#F59E0B; color:#fff; }
-    .cl-hdr-icon.on-lido { background:#C28E2C; color:#fff; }
-    .cl-edital-body { padding:0.9rem 1.1rem !important; }
-    .cl-edital-objeto { color:#111827 !important; font-size:0.95rem; }
-    .cl-edital-meta { gap:0.45rem 1.6rem !important; font-size:0.87rem !important; color:#374151 !important; }
-    .cl-edital-meta b { color:#9CA3AF !important; font-weight:600 !important; }
-    .cl-valor { color:#A9781F; font-weight:800; font-size:1.05rem; }
+    .cl-hdr-icon.on-lido { background:var(--cl-accent); color:#fff; }
+    .cl-edital-body { padding:0.95rem 1.15rem !important; }
+    .cl-edital-objeto { color:#111827 !important; font-size:0.95rem; line-height:1.5; }
+    .cl-edital-meta { gap:0.45rem 1.6rem !important; font-size:0.86rem !important; color:#374151 !important; }
+    .cl-edital-meta b { color:#9CA3AF !important; font-weight:600 !important; text-transform:uppercase; font-size:0.72rem; letter-spacing:0.05em; }
+    .cl-valor { color:var(--cl-accent-d); font-weight:700; font-size:1.08rem; font-family:var(--cl-font-display); }
     .cl-orgao { color:#3A4149; font-weight:600; }
-    .cl-src-chip { display:inline-block; border:1px solid #D1D5DB; border-radius:6px; padding:0.08rem 0.5rem; font-size:0.7rem; font-weight:700; color:#374151; background:#F9FAFB; }
-    .cl-origem-tag { background:#FBF3E3 !important; color:#8A6A1E !important; padding:0.1rem 0.45rem !important; border-radius:4px !important; }
-    .cl-edital-actions { background:#F8FAFC !important; border-top:1px solid #EDF0F3 !important; padding:0.7rem 1.1rem !important; }
+    .cl-src-chip { display:inline-block; border:1px solid #E2E5E9; border-radius:999px; padding:0.1rem 0.55rem; font-size:0.68rem; font-weight:700; color:#374151; background:#F9FAFB; letter-spacing:0.04em; }
+    .cl-origem-tag { background:#FBF3E3 !important; color:#8A6A1E !important; padding:0.1rem 0.5rem !important; border-radius:999px !important; }
+    .cl-edital-actions { background:#FAFBFC !important; border-top:1px solid #EFF1F4 !important; padding:0.55rem 1.15rem !important; }
     .cl-edital-actions-label { font-weight:600 !important; }
-    .cl-btn-primary  { background:#3A4149 !important; color:#fff !important; }
-    .cl-btn-secondary{ background:#fff !important; color:#3A4149 !important; border:1px solid #3A4149 !important; }
-    .cl-boletim-dia { background:#FBF3E3 !important; color:#8A6A1E !important; border-left:4px solid #C28E2C; border-radius:6px; }
-    .cl-header-bar { background:var(--cl-header) !important; border-radius:0 !important; border-bottom:3px solid var(--cl-accent) !important; margin-top:0 !important; }
-    .cl-header-title { font-family:Georgia,'Times New Roman',serif; letter-spacing:0.01em; }
+    .cl-btn { border-radius:9px !important; transition: opacity 0.15s ease, transform 0.15s ease; }
+    .cl-btn:hover { transform: translateY(-1px); }
+    .cl-btn-primary  { background:var(--cl-grad-dark) !important; color:#fff !important; }
+    .cl-btn-secondary{ background:#fff !important; color:#3A4149 !important; border:1px solid #CDD2D8 !important; }
+    .cl-boletim-dia { background:#FBF3E3 !important; color:#8A6A1E !important; border-left:4px solid #C28E2C; border-radius:10px;
+        font-family:var(--cl-font-display); font-weight:600; letter-spacing:0.01em; }
+    .cl-header-bar { background:var(--cl-grad-dark) !important; border-radius:var(--cl-radius) !important;
+        border-bottom:3px solid var(--cl-accent) !important; margin-top:0 !important;
+        box-shadow: var(--cl-shadow-1), 0 14px 30px -18px rgba(194,142,44,0.45); }
+    .cl-header-title { font-family:var(--cl-font-display); letter-spacing:0.005em; font-weight:700; }
     .cl-boletim-head { display:flex; align-items:baseline; gap:0.8rem; flex-wrap:wrap; border-bottom:2px solid #C28E2C; padding-bottom:0.5rem; margin:0.2rem 0 0.9rem 0; }
-    .cl-boletim-head-title { font-size:1.4rem; font-weight:800; color:#3A4149; font-family:Georgia,'Times New Roman',serif; }
+    .cl-boletim-head-title { font-size:1.45rem; font-weight:700; color:#3A4149; font-family:var(--cl-font-display); letter-spacing:-0.01em; }
     .cl-boletim-head-sub { font-size:0.84rem; color:#6B7280; }
-    /* Botões interativos do Streamlit como pílulas azuis pequenas (estilo ConLicitação) */
+    /* Botões — pílulas grafite com tipografia display; primary = gradiente dourado c/ glow */
     .stButton button, [data-testid="stButton"] button, [data-testid="stBaseButton-secondary"] {
-        border-radius:6px !important; font-weight:600 !important; font-size:0.78rem !important;
-        padding:0.28rem 0.7rem !important; min-height:0 !important;
+        border-radius:10px !important; font-weight:600 !important; font-size:0.8rem !important;
+        font-family:var(--cl-font-display) !important; letter-spacing:0.02em !important;
+        padding:0.3rem 0.75rem !important; min-height:0 !important;
         background:#3A4149 !important; border:1px solid #3A4149 !important;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease !important;
     }
     .stButton button *, [data-testid="stButton"] button * { color:#fff !important; }
-    .stButton button:hover, [data-testid="stButton"] button:hover { background:#2E353D !important; border-color:#2E353D !important; }
-    /* Botão "primary" = ativo (navegação) → dourado */
+    .stButton button:hover, [data-testid="stButton"] button:hover {
+        background:#2E353D !important; border-color:#2E353D !important;
+        transform: translateY(-1px); box-shadow: var(--cl-shadow-1); }
     [data-testid="stBaseButton-primary"], .stButton button[kind="primary"] {
-        background:#C28E2C !important; border:1px solid #C28E2C !important; }
+        background:var(--cl-grad-gold) !important; border:1px solid #C28E2C !important;
+        box-shadow: var(--cl-glow-gold) !important; }
     [data-testid="stBaseButton-primary"]:hover, .stButton button[kind="primary"]:hover {
-        background:#A9781F !important; border-color:#A9781F !important; }
+        background:linear-gradient(135deg,#B5832700,#A9781F) #A9781F !important; border-color:#A9781F !important; }
     .stDownloadButton button, [data-testid="stDownloadButton"] button {
-        background:#C28E2C !important; border:1px solid #C28E2C !important; border-radius:6px !important;
-        font-weight:600 !important; font-size:0.78rem !important; padding:0.28rem 0.7rem !important;
+        background:var(--cl-grad-gold) !important; border:1px solid #C28E2C !important; border-radius:10px !important;
+        font-weight:600 !important; font-size:0.8rem !important; font-family:var(--cl-font-display) !important;
+        padding:0.3rem 0.75rem !important; box-shadow: var(--cl-glow-gold) !important;
     }
     .stDownloadButton button * { color:#fff !important; }
-    /* Gatilho do popover "Mais filtros" — discreto, contorno azul */
-    [data-testid="stPopover"] button { background:#fff !important; border:1px solid #3A4149 !important; }
+    /* Popover "Mais filtros" — contorno discreto */
+    [data-testid="stPopover"] button { background:#fff !important; border:1px solid #CDD2D8 !important; box-shadow:none !important; }
     [data-testid="stPopover"] button * { color:#3A4149 !important; }
-    /* Total de licitações */
     .cl-total { color:#374151; font-size:0.95rem; padding-top:0.4rem; }
-    /* Ritmo: cards juntos, ações coladas, expander compacto */
+    /* Ritmo: cards juntos, ações coladas, expander limpo */
     .cl-edital-card { margin-bottom:0.35rem !important; }
     .cl-edital-actions { padding:0.5rem 1.1rem !important; }
-    [data-testid="stExpander"] { border:none !important; margin:0.1rem 0 0.15rem 0 !important; }
-    [data-testid="stExpander"] summary { font-size:0.83rem !important; color:#3A4149 !important; }
+    [data-testid="stExpander"] { border:1px solid #EFF1F4 !important; border-radius:12px !important; margin:0.1rem 0 0.15rem 0 !important; background:#fff; }
+    [data-testid="stExpander"] summary { font-size:0.84rem !important; color:#3A4149 !important; font-weight:600; }
+    [data-testid="stExpander"] summary:hover { color:var(--cl-accent-d) !important; }
+    /* Inputs e selects — cantos suaves + foco dourado */
+    [data-testid="stTextInput"] input, [data-baseweb="input"] input { font-family:var(--cl-font-body) !important; }
+    [data-baseweb="input"], [data-baseweb="select"] > div { border-radius:10px !important; }
+    [data-baseweb="input"]:focus-within, [data-baseweb="select"]:focus-within { border-color:var(--cl-accent) !important; }
+    /* Sub-abas (Histórico) */
+    [data-testid="stTabs"] button { font-family:var(--cl-font-display) !important; font-weight:600 !important; }
+    [data-testid="stTabs"] button[aria-selected="true"] { color:var(--cl-accent-d) !important; }
+    [data-baseweb="tab-highlight"] { background-color:var(--cl-accent) !important; }
+    /* Métricas (Diário) */
+    [data-testid="stMetricValue"] { font-family:var(--cl-font-display) !important; color:var(--cl-accent-d) !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -801,8 +838,9 @@ def _baixar_texto_edital(num_controle: str, link_pdf: str, link_pncp: str) -> st
             ct = resp.headers.get("content-type", "").lower()
             eh_pdf = ("pdf" in ct) or resp.content[:5].startswith(b"%PDF") or u.lower().endswith(".pdf")
             if eh_pdf:
+                # 40 páginas: as exigências de habilitação ficam no meio/fim do edital
                 with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-                    txt = "\n".join((p.extract_text() or "") for p in pdf.pages[:20]).strip()
+                    txt = "\n".join((p.extract_text() or "") for p in pdf.pages[:40]).strip()
                 if len(txt) >= 100:
                     return txt
             else:
@@ -812,7 +850,7 @@ def _baixar_texto_edital(num_controle: str, link_pdf: str, link_pncp: str) -> st
                 txt = re.sub(r"<[^>]+>", " ", html)
                 txt = re.sub(r"\s+", " ", txt).strip()
                 if len(txt) >= 200:
-                    return txt[:12000]
+                    return txt[:40000]
         except Exception:
             continue
     return ""
@@ -1897,6 +1935,108 @@ def _aba_historico() -> None:
         k4.markdown(_card("Volume contratado (m³)", f"{int(vol):,}".replace(",", ".")), unsafe_allow_html=True)
         st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
 
+        # ----- Gráficos (Altair, paleta Concrelagos) -----
+        import altair as alt
+        dfp["_res2"] = res.apply(lambda x: "VITÓRIA" if x.startswith("VIT")
+                                 else ("DERROTA" if x.startswith("DERROT") else "OUTROS"))
+        dfp["_ano"] = pd.to_numeric(dfp.get("ANO"), errors="coerce")
+        dfp["_vol"] = dfp[col_vol].apply(_num_br_solto) if col_vol is not None else 0.0
+        ga = dfp.dropna(subset=["_ano"]).copy()
+        if not ga.empty:
+            ga["_ano"] = ga["_ano"].astype(int)
+
+        gcol1, gcol2 = st.columns([1, 1.6])
+        with gcol1:
+            st.markdown("##### Resultado geral")
+            src = dfp["_res2"].value_counts().reset_index()
+            src.columns = ["resultado", "qtd"]
+            taxa = (vit / max(vit + der, 1)) * 100
+            donut = alt.Chart(src).mark_arc(innerRadius=62, cornerRadius=4).encode(
+                theta=alt.Theta("qtd:Q"),
+                color=alt.Color("resultado:N",
+                                scale=alt.Scale(domain=["VITÓRIA", "DERROTA", "OUTROS"],
+                                                range=["#C28E2C", "#3A4149", "#D4D8DD"]),
+                                legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["resultado:N", "qtd:Q"],
+            ).properties(height=250)
+            _ctr = pd.DataFrame({"t": [f"{taxa:.0f}%"]})
+            centro = alt.Chart(_ctr).mark_text(fontSize=30, fontWeight=700,
+                                               color="#A9781F").encode(text="t:N")
+            sub = alt.Chart(pd.DataFrame({"t": ["de vitória"]})).mark_text(
+                dy=24, fontSize=12, color="#6B7280").encode(text="t:N")
+            st.altair_chart(donut + centro + sub, width='stretch')
+        with gcol2:
+            st.markdown("##### Disputados × vitórias por ano")
+            if not ga.empty:
+                agg = ga.groupby("_ano").agg(
+                    Disputados=("_res2", "size"),
+                    Vitorias=("_res2", lambda s2: int((s2 == "VITÓRIA").sum())),
+                ).reset_index().rename(columns={"Vitorias": "Vitórias"})
+                longf = agg.melt("_ano", var_name="série", value_name="qtd")
+                barras = alt.Chart(longf).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                    x=alt.X("_ano:O", title=None, axis=alt.Axis(labelAngle=0)),
+                    xOffset="série:N",
+                    y=alt.Y("qtd:Q", title=None),
+                    color=alt.Color("série:N",
+                                    scale=alt.Scale(domain=["Disputados", "Vitórias"],
+                                                    range=["#3A4149", "#C28E2C"]),
+                                    legend=alt.Legend(orient="bottom", title=None)),
+                    tooltip=["_ano:O", "série:N", "qtd:Q"],
+                ).properties(height=250)
+                st.altair_chart(barras, width='stretch')
+
+        gcol3, gcol4 = st.columns([1.3, 1])
+        with gcol3:
+            st.markdown("##### Volume contratado (m³) por ano")
+            if not ga.empty:
+                va = ga.groupby("_ano")["_vol"].sum().reset_index()
+                area = alt.Chart(va).mark_area(
+                    interpolate="monotone",
+                    line={"color": "#C28E2C", "strokeWidth": 2.5},
+                    color=alt.Gradient(gradient="linear",
+                                       stops=[alt.GradientStop(color="#FBF3E3", offset=0),
+                                              alt.GradientStop(color="#C28E2C", offset=1)],
+                                       x1=1, x2=1, y1=1, y2=0),
+                ).encode(
+                    x=alt.X("_ano:O", title=None, axis=alt.Axis(labelAngle=0)),
+                    y=alt.Y("_vol:Q", title=None),
+                    tooltip=[alt.Tooltip("_ano:O", title="ano"), alt.Tooltip("_vol:Q", title="m³", format=",.0f")],
+                ).properties(height=240)
+                st.altair_chart(area, width='stretch')
+        with gcol4:
+            st.markdown("##### Top clientes por volume (m³)")
+            if "CLIENTE" in dfp.columns:
+                top = (dfp.assign(_cli=dfp["CLIENTE"].astype(str).str.strip())
+                       .groupby("_cli")["_vol"].sum().nlargest(8).reset_index())
+                top.columns = ["cliente", "vol"]
+                hbar = alt.Chart(top).mark_bar(cornerRadiusEnd=4, color="#C28E2C").encode(
+                    x=alt.X("vol:Q", title=None),
+                    y=alt.Y("cliente:N", sort="-x", title=None, axis=alt.Axis(labelLimit=190)),
+                    tooltip=[alt.Tooltip("cliente:N"), alt.Tooltip("vol:Q", format=",.0f")],
+                ).properties(height=240)
+                st.altair_chart(hbar, width='stretch')
+
+    # ----- Contratos a vencer (aba GANHAS) — radar de renovação/aditivo -----
+    _ganhas_t = next((t for t in dados if "GANHAS" in t.upper()), None)
+    if _ganhas_t:
+        _, _hg, _lg = dados[_ganhas_t]
+        dfg = pd.DataFrame(_lg)
+        if not dfg.empty and "VALIDADE DO CONTRATO" in dfg.columns:
+            _vald = pd.to_datetime(dfg["VALIDADE DO CONTRATO"], errors="coerce", dayfirst=True)
+            _hj = pd.Timestamp.now().normalize()
+            _mk = _vald.notna() & (_vald >= _hj) & (_vald <= _hj + pd.Timedelta(days=90))
+            venc = dfg[_mk].copy()
+            if not venc.empty:
+                st.markdown("##### Contratos a vencer (próximos 90 dias)")
+                venc["_dias"] = (_vald[_mk] - _hj).dt.days
+                for _, rv in venc.sort_values("_dias").iterrows():
+                    st.warning(
+                        f"**{rv.get('CLIENTE', '')}** — pregão {rv.get('Nº DO PREGÃO', '')} · "
+                        f"vence em **{int(rv['_dias'])} dia(s)** ({rv.get('VALIDADE DO CONTRATO', '')}). "
+                        "Avaliar aditivo/renovação."
+                    )
+        st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
     abas = list(dados.keys())
     tabs = st.tabs([t.strip() for t in abas])
     for tab, titulo in zip(tabs, abas):
@@ -1952,28 +2092,49 @@ def _aba_historico() -> None:
 # =========================================================================
 # ANÁLISE DE EDITAIS — GEM do Gemini + agente interno, decisão e mensagens
 # =========================================================================
-GEM_ANALISE_URL = "https://gemini.google.com/gem/1R3_dEXWHLM0-cL8oHTxeMnPjurb1R-Bf"
 FISCAL_WHATSAPP = "5522997570806"
 _ANALISES_ABA = "Analises Editais"
 _ANALISES_HEADER = ["numero_controle_pncp", "data", "status", "dados_json"]
 
+# Agente "LICITAÇÕES" — o melhor analista de licitações do Brasil (prompt do GEM,
+# aprimorado). Missão: análise exaustiva SEM deixar passar nada que inabilite.
 _PROMPT_ANALISE = (
-    "Você é analista de licitações da Concrelagos (vende concreto usinado e brita). "
-    "Extraia do edital abaixo os dados do certame. Responda APENAS com JSON válido, sem markdown:\n"
-    '{"orgao": "ex: Prefeitura Municipal de Ubá/MG",\n'
-    ' "cidade_uf": "Cidade/UF",\n'
-    ' "limite_proposta": "DD/MM/AAAA às HH:MMh (horário de Brasília)",\n'
-    ' "inicio_disputa": "DD/MM/AAAA às HH:MMh (horário de Brasília)",\n'
-    ' "vigencia": "ex: 12 (doze) meses (validade da Ata de Registro de Preços)",\n'
-    ' "quantidade": "ex: 2.176 m³ de concreto usinado (FCK 15/20/25/30, convencional e bombeado)",\n'
-    ' "valor_maximo": "ex: R$ 1.812.711,68 no total",\n'
-    ' "objeto": "resumo fiel do objeto em 1-3 frases",\n'
-    ' "local_entrega": "onde os serviços/entregas ocorrerão",\n'
-    ' "dias_horario": "dias e horários de entrega",\n'
-    ' "volume_minimo": "volume mínimo por entrega (ex: 3,0 m³)",\n'
-    ' "riscos": "1-2 frases: exigências de habilitação/atestados/visita técnica ou outros pontos de atenção"}\n'
-    'Quando um dado não constar no texto, use "a confirmar no edital".\n\n'
-    "Edital (primeiros 12000 caracteres):\n"
+    "Você é o LICITAÇÕES, o melhor analista de licitações do Brasil — especialista sênior "
+    "a serviço da Concrelagos (fornecedora de concreto usinado e brita). Sua função é analisar "
+    "este edital com EXTREMA precisão para garantir que a empresa NÃO seja inabilitada. "
+    "Nenhum detalhe pode passar.\n\n"
+    "Regras de análise:\n"
+    "- Para CADA documento de habilitação exigido, transcreva o TEXTO EXATO da exigência "
+    "conforme consta no edital e o item/cláusula onde aparece.\n"
+    "- Atenção extrema a: prazos, datas e validades de certidões, índices contábeis mínimos, "
+    "atestados de capacidade técnica (quantitativos mínimos), registro em conselho (CREA etc.), "
+    "visita técnica, amostras/laudos, garantia de proposta e tratamento ME/EPP (LC 123/2006).\n"
+    "- Identifique a PLATAFORMA (site) onde ocorrerá a disputa e o link, se constar.\n"
+    "- Extraia a logística completa: volume mínimo por entrega (m³), local de entrega, prazo de "
+    "entrega, prazo de faturamento/pagamento, regras de emissão de nota fiscal e observações de "
+    "fornecimento (dias/horários).\n"
+    "- Se houver ambiguidade ou contradição no edital, formule o QUESTIONAMENTO a enviar ao órgão.\n\n"
+    "Responda APENAS com JSON válido, sem markdown, exatamente neste formato:\n"
+    '{"certame": {"orgao": "", "cidade_uf": "Cidade/UF", '
+    '"limite_proposta": "DD/MM/AAAA às HH:MMh (horário de Brasília)", '
+    '"inicio_disputa": "DD/MM/AAAA às HH:MMh (horário de Brasília)", "vigencia": "", '
+    '"quantidade": "ex: 2.176 m³ de concreto usinado (FCK 15/20/25/30, convencional e bombeado)", '
+    '"valor_maximo": "", "objeto": "resumo fiel em 1-3 frases", "local_entrega": "", '
+    '"dias_horario": "", "volume_minimo": ""},\n'
+    ' "plataforma": {"nome": "ex: Licitar Digital / BLL / ComprasNet", "link": "url ou vazio"},\n'
+    ' "documentos": {\n'
+    '   "constitutivos": [{"exigencia": "nome curto", "texto_exato": "transcrição literal do edital", "item_edital": "ex: 8.1.1"}],\n'
+    '   "certidoes": [{"exigencia": "", "texto_exato": "", "item_edital": ""}],\n'
+    '   "qualificacao_tecnica": [{"exigencia": "", "texto_exato": "", "item_edital": ""}],\n'
+    '   "qualificacao_financeira": [{"exigencia": "", "texto_exato": "", "item_edital": ""}],\n'
+    '   "outras": [{"exigencia": "", "texto_exato": "", "item_edital": ""}]},\n'
+    ' "logistica": {"volume_minimo": "", "local_entrega": "", "prazo_entrega": "", '
+    '"prazo_faturamento": "", "regras_nota_fiscal": "", "observacoes_fornecimento": ""},\n'
+    ' "me_epp": "tratamento diferenciado ME/EPP aplicável (ou não) e impactos",\n'
+    ' "riscos_inabilitacao": ["cada ponto que pode INABILITAR a empresa, em ordem de gravidade"],\n'
+    ' "questionamentos_sugeridos": ["questionamentos a enviar ao órgão, se houver ambiguidade"]}\n'
+    'Use "a confirmar no edital" quando o dado não constar; listas vazias [] quando não houver.\n\n'
+    "Edital (texto extraído):\n"
 )
 
 
@@ -2029,7 +2190,7 @@ def _analisar_edital_ia(num_controle: str, link_pdf: str, link_pncp: str) -> dic
             st.warning("Não consegui extrair o texto do edital (PDF escaneado ou sem download direto). "
                        "Baixe o edital e use o GEM no Gemini.")
             return None
-        raw = _gemini_gerar(_PROMPT_ANALISE + texto[:12000])
+        raw = _gemini_gerar(_PROMPT_ANALISE + texto[:40000])
     if not raw:
         return None
     if raw.startswith("```"):
@@ -2104,11 +2265,12 @@ def _aba_analise(ed: pd.DataFrame) -> None:
     link_origem = str(d.get("link_sistema_origem") or "")
     link_pncp = str(d.get("link_pncp") or "")
 
-    b1, b2, b3 = st.columns([1.4, 1.2, 3])
+    b1, b2 = st.columns([1.8, 3.2])
     with b1:
-        analisar = st.button("Analisar aqui (IA)", type="primary", width='stretch')
+        analisar = st.button("Analisar com o agente LICITAÇÕES", type="primary", width='stretch')
     with b2:
-        st.link_button("Abrir GEM (Gemini)", GEM_ANALISE_URL, width='stretch')
+        st.caption("Análise exaustiva: plataforma de disputa, documentos de habilitação com texto "
+                   "exato, logística/faturamento e riscos de inabilitação.")
     if analisar:
         res = _analisar_edital_ia(nc, link_origem, link_pncp)
         if res:
@@ -2117,18 +2279,87 @@ def _aba_analise(ed: pd.DataFrame) -> None:
 
     dados = st.session_state.get(f"anl_{nc}")
     if not dados:
-        st.caption("Clique em Analisar para a IA extrair os dados do certame direto do edital.")
+        st.caption("Selecione o edital e clique em Analisar — o agente lê o edital inteiro e "
+                   "monta o dossiê de participação.")
         return
 
-    st.markdown("##### Dados do certame (extraídos pela IA)")
+    # Compatibilidade: análise nova é aninhada (certame/documentos/...); antiga era plana.
+    cert = dados.get("certame") if isinstance(dados.get("certame"), dict) else dados
+    plat = dados.get("plataforma") or {}
+    docs = dados.get("documentos") or {}
+    logi = dados.get("logistica") or {}
+    riscos = dados.get("riscos_inabilitacao") or ([dados.get("riscos")] if dados.get("riscos") else [])
+    quests = dados.get("questionamentos_sugeridos") or []
+
+    st.markdown("##### Dados do certame")
     st.markdown(
-        f"**Órgão:** {_g(dados,'orgao')}  \n"
-        f"**Limite p/ proposta:** {_g(dados,'limite_proposta')} · **Disputa:** {_g(dados,'inicio_disputa')}  \n"
-        f"**Vigência:** {_g(dados,'vigencia')}  \n"
-        f"**Quantidade:** {_g(dados,'quantidade')} · **Valor máximo:** {_g(dados,'valor_maximo')}  \n"
-        f"**Local de entrega:** {_g(dados,'local_entrega')} · **Volume mínimo:** {_g(dados,'volume_minimo')}  \n"
-        f"**Pontos de atenção:** {_g(dados,'riscos')}"
+        f"**Órgão:** {_g(cert,'orgao')}  \n"
+        f"**Limite p/ proposta:** {_g(cert,'limite_proposta')} · **Disputa:** {_g(cert,'inicio_disputa')}  \n"
+        f"**Vigência:** {_g(cert,'vigencia')}  \n"
+        f"**Quantidade:** {_g(cert,'quantidade')} · **Valor máximo:** {_g(cert,'valor_maximo')}  \n"
+        f"**Local de entrega:** {_g(cert,'local_entrega')} · **Volume mínimo:** {_g(cert,'volume_minimo')}"
     )
+
+    # Plataforma da disputa
+    _pnome = str(plat.get("nome") or "").strip()
+    _plink = str(plat.get("link") or "").strip()
+    if _pnome or _plink:
+        st.markdown("##### Plataforma da disputa")
+        if _plink and _plink.lower().startswith("http"):
+            st.markdown(f"**{_pnome or 'Plataforma'}** — [{_plink}]({_plink})")
+        else:
+            st.markdown(f"**{_pnome or 'a confirmar no edital'}**" + (f" — {_plink}" if _plink else ""))
+
+    # Documentos de habilitação (texto exato por categoria)
+    _CATS = [
+        ("constitutivos", "Documentos constitutivos"),
+        ("certidoes", "Certidões"),
+        ("qualificacao_tecnica", "Qualificação técnica"),
+        ("qualificacao_financeira", "Qualificação econômico-financeira"),
+        ("outras", "Outras exigências"),
+    ]
+    if any(docs.get(k) for k, _ in _CATS):
+        st.markdown("##### Documentos de habilitação")
+        for k, rotulo in _CATS:
+            itens = docs.get(k) or []
+            if not itens:
+                continue
+            with st.expander(f"{rotulo} ({len(itens)})"):
+                for it in itens:
+                    if not isinstance(it, dict):
+                        st.markdown(f"- {it}")
+                        continue
+                    _ex = str(it.get("exigencia") or "").strip() or "Exigência"
+                    _item = str(it.get("item_edital") or "").strip()
+                    _txt = str(it.get("texto_exato") or "").strip()
+                    st.markdown(f"**{_ex}**" + (f" — item {_item}" if _item else ""))
+                    if _txt:
+                        st.markdown(f"> {_txt}")
+
+    # Logística e faturamento
+    if any(str(logi.get(k) or "").strip() for k in logi):
+        st.markdown("##### Logística e faturamento")
+        st.markdown(
+            f"**Volume mínimo:** {_g(logi,'volume_minimo')} · **Prazo de entrega:** {_g(logi,'prazo_entrega')}  \n"
+            f"**Local de entrega:** {_g(logi,'local_entrega')}  \n"
+            f"**Faturamento:** {_g(logi,'prazo_faturamento')} · **Nota fiscal:** {_g(logi,'regras_nota_fiscal')}  \n"
+            f"**Fornecimento:** {_g(logi,'observacoes_fornecimento')}"
+        )
+
+    _meepp = str(dados.get("me_epp") or "").strip()
+    if _meepp:
+        st.markdown(f"**ME/EPP:** {_meepp}")
+
+    # Riscos de inabilitação — destaque máximo
+    riscos = [str(r).strip() for r in riscos if str(r or "").strip()]
+    if riscos:
+        st.error("**Riscos de inabilitação — confira um a um:**\n\n" +
+                 "\n".join(f"- {r}" for r in riscos))
+
+    quests = [str(q).strip() for q in quests if str(q or "").strip()]
+    if quests:
+        st.info("**Questionamentos sugeridos ao órgão:**\n\n" +
+                "\n".join(f"- {q}" for q in quests))
 
     dc1, dc2, _ = st.columns([1.2, 1.2, 3])
     estado_key = f"anl_status_{nc}"
@@ -2154,22 +2385,22 @@ def _aba_analise(ed: pd.DataFrame) -> None:
     # ----- Mensagem ao regional -----
     st.markdown("##### 1) Mensagem ao regional")
     nome_regional = st.text_input("Nome do regional", placeholder="ex: João")
-    cidade_uf = _g(dados, "cidade_uf") if _g(dados, "cidade_uf") != "a confirmar no edital" else f"{d.get('municipio')}/{d.get('uf')}"
+    cidade_uf = _g(cert, "cidade_uf") if _g(cert, "cidade_uf") != "a confirmar no edital" else f"{d.get('municipio')}/{d.get('uf')}"
     msg_regional = (
         f"Bom dia {nome_regional or '(nome do regional)'}! Tudo bom?\n"
         f"Encontramos uma licitação no Município de {cidade_uf}, me informe se atendemos lá, por favor? "
         f"E se sim, qual a filial que irá participar, e também me informe o preço limite.\n"
         f"Dados do Certame:\n"
-        f"1. Órgão solicitante: {_g(dados,'orgao')}.\n"
-        f"2. Limite para Envio da Proposta: {_g(dados,'limite_proposta')}.\n"
-        f"3. Início da Disputa (Lances): {_g(dados,'inicio_disputa')}.\n"
-        f"4. Prazo de vigência da contratação: {_g(dados,'vigencia')}.\n"
-        f"5. Quantidade Total Estimada: {_g(dados,'quantidade')}.\n"
-        f"6. Valor Estimado (Preço Máximo): {_g(dados,'valor_maximo')}.\n"
-        f"7. OBJETO: {_g(dados,'objeto')}.\n"
-        f"8. Local de Entrega: {_g(dados,'local_entrega')}.\n"
-        f"9. Dias e Horário de Entrega: {_g(dados,'dias_horario')}.\n"
-        f"10. Volume Mínimo por Entrega: {_g(dados,'volume_minimo')}."
+        f"1. Órgão solicitante: {_g(cert,'orgao')}.\n"
+        f"2. Limite para Envio da Proposta: {_g(cert,'limite_proposta')}.\n"
+        f"3. Início da Disputa (Lances): {_g(cert,'inicio_disputa')}.\n"
+        f"4. Prazo de vigência da contratação: {_g(cert,'vigencia')}.\n"
+        f"5. Quantidade Total Estimada: {_g(cert,'quantidade')}.\n"
+        f"6. Valor Estimado (Preço Máximo): {_g(cert,'valor_maximo')}.\n"
+        f"7. OBJETO: {_g(cert,'objeto')}.\n"
+        f"8. Local de Entrega: {_g(cert,'local_entrega')}.\n"
+        f"9. Dias e Horário de Entrega: {_g(cert,'dias_horario')}.\n"
+        f"10. Volume Mínimo por Entrega: {_g(cert,'volume_minimo')}."
     )
     st.code(msg_regional, language=None)
     st.warning("Lembrete: anexar o PRINT DOS ITENS e o PDF DO EDITAL ao enviar a mensagem.")
