@@ -889,18 +889,25 @@ def qualificar_por_distancia(
     coords_offline = _carregar_coords_offline()
     atend, regex_obra, nome2key = _municipios_atendidos(filiais)
 
-    def _match(coord, material, valor):
-        """(tipo, filial, dist_km) se 'coord' está no raio para o material; senão None."""
+    def _match(coord, material, valor, uf_local):
+        """(tipo, filial, dist_km) se 'coord' está no raio para o material; senão None.
+
+        REGRA DE NEGÓCIO: a filial precisa estar no MESMO ESTADO do edital/obra —
+        edital de MG atendido por usina de SP NÃO vale (não participamos)."""
         if coord is None:
             return None
         if material == "concreto" and usinas:
-            d, f = _menor_distancia(coord, usinas)
-            if d is not None and d <= RAIO_USINA_KM:
-                return ("atendimento_usina", f, round(d, 2))
+            cand = [u for u in usinas if u.get("uf") == uf_local]
+            if cand:
+                d, f = _menor_distancia(coord, cand)
+                if d is not None and d <= RAIO_USINA_KM:
+                    return ("atendimento_usina", f, round(d, 2))
         if material == "brita" and pedreiras and (valor or 0) >= VALOR_MINIMO_PEDREIRA:
-            d, f = _menor_distancia(coord, pedreiras)
-            if d is not None and d <= RAIO_PEDREIRA_KM:
-                return ("atendimento_pedreira", f, round(d, 2))
+            cand = [p for p in pedreiras if p.get("uf") == uf_local]
+            if cand:
+                d, f = _menor_distancia(coord, cand)
+                if d is not None and d <= RAIO_PEDREIRA_KM:
+                    return ("atendimento_pedreira", f, round(d, 2))
         return None
 
     falhas_geo = 0
@@ -928,8 +935,8 @@ def qualificar_por_distancia(
         eh_estad_fed = esf[:1] in ("e", "f")
         cobertos = ESTADOS_BRITA if material == "brita" else ESTADOS_CONCRETO
 
-        # A) qualifica pelo município do ÓRGÃO
-        res = _match(origem, material, valor)
+        # A) qualifica pelo município do ÓRGÃO (filial do MESMO estado)
+        res = _match(origem, material, valor, uf)
 
         # B) qualifica pelo LOCAL DA OBRA citado no objeto — SÓ para órgãos
         #    Estaduais/Federais (DER, DNIT, saneamento...). Prefeitura (municipal)
@@ -941,7 +948,7 @@ def qualificar_por_distancia(
                 nome_obra = mm.group(1) or mm.group(2)
                 key = nome2key.get(nome_obra) if nome_obra else None
                 obra_coord = coords_offline.get(key) if key else None
-                r2 = _match(obra_coord, material, valor)
+                r2 = _match(obra_coord, material, valor, key[1] if key else "")
                 if r2:
                     res = r2
                     local_obra = f"{key[0].title()}/{key[1]}"
@@ -1058,15 +1065,20 @@ def _municipios_atendidos(filiais: dict[str, list[dict]]):
     for (mun, uf), origem in coords.items():
         # Só municípios nos estados que cobrimos (concreto) — evita casar obra
         # em estado fora da área e reduz o regex de busca no texto.
+        # REGRA: a filial precisa ser do MESMO estado do município (MG←SP não vale).
         if usinas and uf in ESTADOS_CONCRETO:
-            du, fu = _menor_distancia(origem, usinas)
-            if du is not None and du <= RAIO_USINA_KM:
-                atend[(mun, uf)] = {"filial": fu, "dist_km": round(du, 2), "tipo": "usina"}
-                continue
+            cand = [u for u in usinas if u.get("uf") == uf]
+            if cand:
+                du, fu = _menor_distancia(origem, cand)
+                if du is not None and du <= RAIO_USINA_KM:
+                    atend[(mun, uf)] = {"filial": fu, "dist_km": round(du, 2), "tipo": "usina"}
+                    continue
         if uf == "RJ" and pedreiras:
-            dp, fp = _menor_distancia(origem, pedreiras)
-            if dp is not None and dp <= RAIO_PEDREIRA_KM:
-                atend[(mun, uf)] = {"filial": fp, "dist_km": round(dp, 2), "tipo": "pedreira"}
+            candp = [p for p in pedreiras if p.get("uf") == uf]
+            if candp:
+                dp, fp = _menor_distancia(origem, candp)
+                if dp is not None and dp <= RAIO_PEDREIRA_KM:
+                    atend[(mun, uf)] = {"filial": fp, "dist_km": round(dp, 2), "tipo": "pedreira"}
 
     nome2key: dict[str, tuple[str, str]] = {}
     nomes: list[str] = []
