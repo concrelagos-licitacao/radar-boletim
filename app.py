@@ -588,6 +588,34 @@ def _carregar_execucoes() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=300, show_spinner="Carregando triagem da IA...")
+def _carregar_triagem_ia() -> pd.DataFrame:
+    """Carrega a aba 'Triagem IA' (cache das decisões do portão Gemini).
+
+    Deduplica pela ÚLTIMA linha por numero_controle_pncp — um 'verificado'/'negado'
+    posterior sobrepõe um 'pendente' anterior (mesma lógica de scraper._carregar_triagem).
+    Retorna DataFrame vazio se a aba estiver ausente/vazia ou em qualquer erro.
+    """
+    try:
+        gc = _build_gspread_client()
+        sh = gc.open_by_key(_get_sheet_id())
+        ws = sh.worksheet("Triagem IA")
+        vals = ws.get_all_values()
+        if not vals or len(vals) < 2:
+            return pd.DataFrame()
+        header = [h.strip() for h in vals[0]]
+        rows = [dict(zip(header, r)) for r in vals[1:] if any(c.strip() for c in r)]
+        df = pd.DataFrame(rows)
+        if df.empty:
+            return pd.DataFrame()
+        # Dedup pela ÚLTIMA ocorrência de cada numero_controle_pncp
+        if "numero_controle_pncp" in df.columns:
+            df = df.drop_duplicates(subset=["numero_controle_pncp"], keep="last")
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def _lidos_set() -> set:
     """Retorna o set de num_controle_pncp marcados como lidos (em session_state).
     Inicializa fazendo leitura do Sheets na primeira chamada da sessão."""
@@ -1799,8 +1827,67 @@ def _aba_filiais(fil: pd.DataFrame) -> None:
                 )
 
 
+def _painel_saude_cobertura() -> None:
+    """Painel de SAÚDE DA COBERTURA no topo do Diário — torna visíveis as duas
+    falhas silenciosas: (1) coleta que voltou vazia (PNCP instável) e (2) obras
+    genéricas (score=1) seguradas no portão da IA aguardando a cota do Gemini."""
+    st.markdown("#### Saúde da cobertura")
+
+    # ── (1) Alerta de coleta vazia (aba Execucoes) ──────────────────────────
+    exec_df = _carregar_execucoes()  # @st.cache_data — chamar 2x não custa I/O extra
+    if not exec_df.empty:
+        # Última execução = maior data_execucao (com fallback para a última linha)
+        if "data_execucao" in exec_df.columns and exec_df["data_execucao"].notna().any():
+            ult_exec = exec_df.sort_values("data_execucao").iloc[-1]
+        else:
+            ult_exec = exec_df.iloc[-1]
+
+        status_ult = str(ult_exec.get("status", "")).strip().lower()
+        brutos_ult = pd.to_numeric(ult_exec.get("brutos", 0), errors="coerce")
+        brutos_ult = 0 if pd.isna(brutos_ult) else int(brutos_ult)
+
+        if status_ult == "alerta" or brutos_ult == 0:
+            # Quantas das últimas 10 execuções voltaram vazias
+            recentes = exec_df.copy()
+            if "data_execucao" in recentes.columns:
+                recentes = recentes.sort_values("data_execucao")
+            recentes = recentes.tail(10)
+            st_recentes = recentes.get("status", pd.Series(dtype=str)).astype(str).str.strip().str.lower()
+            br_recentes = pd.to_numeric(
+                recentes.get("brutos", pd.Series([0] * len(recentes), index=recentes.index)),
+                errors="coerce",
+            ).fillna(0)
+            vazias = int(((st_recentes == "alerta") | (br_recentes == 0)).sum())
+
+            st.error(
+                "Última coleta voltou vazia (PNCP instável) — a janela pode não ter sido "
+                "coberta. A próxima rodada re-tenta (janela de 3 dias da sobreposição).\n\n"
+                f"**{vazias} das últimas {len(recentes)} execuções** voltaram vazias."
+            )
+
+    # ── (2) Card: obras aguardando confirmação da IA (aba Triagem IA) ────────
+    triagem_df = _carregar_triagem_ia()
+    n_pendentes = 0
+    if not triagem_df.empty and "status" in triagem_df.columns:
+        _st = triagem_df["status"].astype(str).str.strip().str.lower()
+        n_pendentes = int((_st == "pendente").sum())
+
+    cc1, cc2 = st.columns([1, 3])
+    cc1.markdown(_card("Aguardando IA (cota)", f"{n_pendentes}"), unsafe_allow_html=True)
+    cc2.caption(
+        "Obras genéricas (score = 1) seguradas até a cota gratuita do Gemini voltar. "
+        "Se esse número crescer, elas podem expirar antes de entrar no boletim — "
+        "considerar um backfill manual."
+    )
+
+    st.markdown('<div class="cl-divider"></div>', unsafe_allow_html=True)
+
+
 def _aba_diario(ed: pd.DataFrame, ultima: datetime | None) -> None:
     st.subheader("Diário de Execução")
+
+    # ── Painel de Saúde da Cobertura (topo) ────────────────────────────────
+    _painel_saude_cobertura()
 
     # ── Seção 1: Histórico de Runs (aba Execucoes) ─────────────────────────
     exec_df = _carregar_execucoes()
