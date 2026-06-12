@@ -478,15 +478,25 @@ def carregar_filiais(sheet_id: str) -> dict[str, list[dict]]:
 # =========================================================================
 # FASE 2 — BUSCA NO PNCP
 # =========================================================================
-def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
+def buscar_editais_pncp(data_inicial: date, data_final: date) -> tuple[list[dict], bool]:
     """Consulta o endpoint público de contratações publicadas no PNCP.
 
     Pagina automaticamente e varre as modalidades em PNCP_MODALIDADES.
     Falhas de rede são logadas, mas o que já foi coletado é preservado.
+
+    Retorna (coletados, integra). `integra` é True somente se TODAS as
+    modalidades responderam de forma confiável: nenhuma teve a página 1
+    falhada por timeout/throttling esgotado (payload None com 0 itens
+    coletados até então). Esse flag é o sinal de integridade usado pelo
+    watermark de cobertura — uma modalidade que esgotou retries por timeout
+    é indistinguível de "0 editais legítimos" no total agregado, então
+    precisamos do sinal por modalidade para não avançar o watermark sobre
+    uma coleta PARCIAL (que perderia a modalidade que falhou).
     """
     coletados: list[dict] = []
 
     contagem_por_modalidade: dict[int, int] = {}
+    modalidades_falhas: list[int] = []  # modalidades cuja pág. 1 falhou (timeout/throttling esgotado)
     for i_mod, modalidade in enumerate(PNCP_MODALIDADES):
         if i_mod > 0:
             time.sleep(PNCP_PAUSA_S)  # pausa entre modalidades evita throttling do PNCP
@@ -502,6 +512,18 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
             }
             payload = _pncp_get_com_retry(params, modalidade, pagina)
             if payload is None:
+                # payload None = retries esgotados (timeout/throttling) nesta página.
+                # Marca a modalidade como FALHA em QUALQUER página, não só na pág. 1:
+                #   - pág. 1 falhada  => modalidade inteira perdida.
+                #   - pág. >1 falhada => coleta PARCIAL da modalidade (já trouxe N páginas,
+                #     mas as restantes ficaram de fora) — se o watermark avançasse aqui,
+                #     perderíamos os editais das páginas não lidas para sempre.
+                # Em ambos os casos a coleta da janela é INCOMPLETA => watermark NÃO avança;
+                # a próxima rodada recupera o buraco (overlap garante que não se perde nada).
+                # (HTTP 422 também retorna None na pág. 1, mas significa "sem dados na
+                #  janela", que é legítimo; nesse caso paginamos só a pág. 1 e o
+                #  falso-positivo conservador apenas adia o avanço do watermark um ciclo.)
+                modalidades_falhas.append(modalidade)
                 break
 
             itens = payload.get("data") or []
@@ -531,7 +553,14 @@ def buscar_editais_pncp(data_inicial: date, data_final: date) -> list[dict]:
                  len(coletados), data_inicial, data_final, contagem_por_modalidade)
     if not coletados:
         logging.warning("PNCP retornou 0 editais brutos — possível problema de API, rede ou janela de datas vazia.")
-    return coletados
+
+    # Integridade: True só se TODAS as modalidades responderam (nenhuma com pág.1 falhada).
+    integra = not modalidades_falhas
+    if modalidades_falhas:
+        logging.warning("PNCP COLETA PARCIAL — modalidades sem resposta confiável (timeout/throttling esgotado): %s. "
+                        "Watermark NÃO será avançado para que a próxima rodada recupere o buraco.",
+                        modalidades_falhas)
+    return coletados, integra
 
 
 def _pncp_get_com_retry(params: dict, modalidade: int, pagina: int) -> dict | None:
@@ -1642,6 +1671,11 @@ _EXECUCOES_HEADER = [
     "apos_geo", "novos", "tempo_s", "erro_msg",
 ]
 
+# Marcador gravado em erro_msg quando a rodada foi um BACKFILL manual
+# (override PNCP_DATA_INICIAL/FINAL). _ler_watermark ignora essas linhas para
+# que um backfill histórico nunca avance o watermark até a data de hoje.
+_BACKFILL_TAG = "backfill manual (override) — nao usar como watermark"
+
 def _gravar_execucao_sheets(sheet_id: str, dados: dict) -> None:
     """Grava uma linha de auditoria na aba 'Execucoes' do Sheets.
 
@@ -1666,6 +1700,64 @@ def _gravar_execucao_sheets(sheet_id: str, dados: dict) -> None:
         logging.info("Execução gravada na aba 'Execucoes' do Sheets.")
     except Exception as exc:
         logging.warning("Não foi possível gravar execução no Sheets: %s", exc)
+
+
+def _ler_watermark(sheet_id: str) -> date | None:
+    """Deriva o WATERMARK de cobertura a partir da própria aba 'Execucoes'.
+
+    Watermark = data até a qual a cobertura já foi CONFIRMADA íntegra. Custo
+    zero: reusa a aba/header/cliente gspread que já existem — só LÊ, nunca
+    escreve (a escrita acontece de graça no append de _gravar_execucao_sheets).
+
+    Regra: pega o MAIOR `data_execucao` entre as linhas cuja coleta foi
+    comprovadamente íntegra — status == "ok" E int(brutos) > 0. Linhas
+    "alerta"/"erro" (vazias, parciais, com exceção) são ignoradas, então um
+    gap se auto-cura: o watermark recua sozinho até o último sucesso real e a
+    janela da próxima rodada cobre os dias perdidos.
+
+    Retorna a DATA do último sucesso, ou None se não houver watermark ainda
+    (primeira vez / aba inexistente / leitura falhou) — nesse caso o chamador
+    cai no comportamento atual (JANELA_DIAS). Falha silenciosa.
+    """
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet("Execucoes")
+        except gspread.exceptions.WorksheetNotFound:
+            return None  # primeira vez: aba ainda não existe
+        registros = ws.get_all_records()  # dicts por header _EXECUCOES_HEADER
+        melhor: date | None = None
+        for reg in registros:
+            if str(reg.get("status", "")).strip().lower() != "ok":
+                continue
+            # Ignora rodadas de BACKFILL manual: a data_execucao é HOJE, mas a janela
+            # coberta é histórica — usá-la como watermark criaria um gap. (invariante 4)
+            if str(reg.get("erro_msg", "")).strip() == _BACKFILL_TAG:
+                continue
+            try:
+                if int(str(reg.get("brutos", "0")).strip() or "0") <= 0:
+                    continue
+            except (ValueError, TypeError):
+                continue
+            bruto_data = str(reg.get("data_execucao", "")).strip()
+            if not bruto_data:
+                continue
+            try:
+                # data_execucao é ISO datetime ("2026-06-12T08:30:00"); pegamos só a DATA
+                d = datetime.fromisoformat(bruto_data).date()
+            except ValueError:
+                try:
+                    d = date.fromisoformat(bruto_data[:10])
+                except ValueError:
+                    continue
+            if melhor is None or d > melhor:
+                melhor = d
+        return melhor
+    except Exception as exc:
+        logging.warning("Não foi possível ler o watermark de 'Execucoes' (caindo em JANELA_DIAS): %s", exc)
+        return None
 
 
 # =========================================================================
@@ -1992,22 +2084,65 @@ def main() -> None:
     load_dotenv()
     _validar_env()
 
-    # Janela: aceita PNCP_DATA_INICIAL/PNCP_DATA_FINAL como override (formato YYYY-MM-DD)
-    # ou cai no padrão JANELA_DIAS (D-N até hoje).
+    sheet_id = os.environ["GOOGLE_SHEETS_ID"]
+
+    # Janela de coleta. Três modos, nesta ordem de precedência:
+    #   (a) OVERRIDE MANUAL — PNCP_DATA_INICIAL/PNCP_DATA_FINAL (backfill via
+    #       workflow_dispatch). Vence tudo; o watermark é ignorado e NÃO é
+    #       avançado por um backfill manual (override_manual=True desliga o avanço).
+    #   (b) WATERMARK DE COBERTURA — janela = [watermark - overlap, hoje], com
+    #       PISO=JANELA_DIAS e CAP=PNCP_JANELA_MAX_DIAS. Cada rodada cobre desde
+    #       o último sucesso confirmado, então rodada vazia/falha não perde edital.
+    #   (c) PISO PURO (primeira vez, sem watermark) — comportamento atual: [hoje-JANELA_DIAS, hoje].
     di_str = os.getenv("PNCP_DATA_INICIAL", "").strip()
     df_str = os.getenv("PNCP_DATA_FINAL", "").strip()
-    if di_str and df_str:
+    janela_piso = int(os.getenv("JANELA_DIAS", "1"))          # PISO: janela mínima
+    janela_max = int(os.getenv("PNCP_JANELA_MAX_DIAS", "30")) # CAP: janela máxima
+    overlap_dias = 1                                          # sobreposição de segurança
+    override_manual = bool(di_str and df_str)
+
+    if override_manual:
+        # (a) OVERRIDE MANUAL — vence o watermark; não avança o watermark depois.
         data_inicial = date.fromisoformat(di_str)
         data_final = date.fromisoformat(df_str)
-        logging.info("Janela FIXA configurada via .env: %s a %s.", data_inicial, data_final)
+        logging.info("Janela FIXA (override manual via .env): %s a %s. Watermark IGNORADO e NÃO será avançado.",
+                     data_inicial, data_final)
     else:
-        janela = int(os.getenv("JANELA_DIAS", "1"))
         hoje = date.today()
-        data_inicial = hoje - timedelta(days=janela)
         data_final = hoje
-        logging.info("Janela relativa (JANELA_DIAS=%d): %s a %s.", janela, data_inicial, data_final)
+        piso_inicial = hoje - timedelta(days=janela_piso)      # janela mínima (PISO)
+        cap_inicial = hoje - timedelta(days=janela_max)        # janela máxima (CAP)
+        watermark = _ler_watermark(sheet_id)
+        if watermark is None:
+            # (c) PISO PURO — primeira vez / sem watermark: comportamento atual.
+            data_inicial = piso_inicial
+            logging.info("Janela relativa SEM watermark (primeira vez) — fonte=PISO (JANELA_DIAS=%d): %s a %s.",
+                         janela_piso, data_inicial, data_final)
+        else:
+            # (b) WATERMARK — começa 1 dia antes do último sucesso confirmado (overlap).
+            base = watermark - timedelta(days=overlap_dias)
+            # PISO: nunca menor que JANELA_DIAS (se watermark for muito recente).
+            data_inicial = min(base, piso_inicial)
+            fonte = "watermark" if data_inicial == base else "piso"
+            # CAP: nunca maior que PNCP_JANELA_MAX_DIAS — se o buraco for maior,
+            # cobre só o cap; o resto fica para a próxima rodada (watermark não avança
+            # além do que foi de fato coletado, então o buraco persiste e se auto-cura).
+            if data_inicial < cap_inicial:
+                logging.warning(
+                    "Janela de cobertura (%s a %s, %d dias) excede CAP de %d dias "
+                    "(buraco desde watermark=%s maior que o teto). Cobrindo só o CAP; "
+                    "o restante fica para a próxima rodada.",
+                    data_inicial, data_final, (data_final - data_inicial).days,
+                    janela_max, watermark,
+                )
+                data_inicial = cap_inicial
+                fonte = "cap"
+            logging.info(
+                "Janela de COBERTURA — fonte=%s | watermark=%s overlap=%dd piso=%dd cap=%dd | janela efetiva: %s a %s (%d dias).",
+                fonte, watermark, overlap_dias, janela_piso, janela_max,
+                data_inicial, data_final, (data_final - data_inicial).days,
+            )
 
-    sheet_id = os.environ["GOOGLE_SHEETS_ID"]
     filiais = carregar_filiais(sheet_id)
 
     t0 = time.time()
@@ -2016,9 +2151,10 @@ def main() -> None:
     qualificados: list[dict] = []
     pre: list[dict] = []
     brutos: list[dict] = []
+    pncp_integra = False  # só vira True se a coleta PNCP foi íntegra (todas as modalidades responderam)
     try:
         # ---- PNCP (fonte primária) ----
-        brutos_pncp = buscar_editais_pncp(data_inicial, data_final)
+        brutos_pncp, pncp_integra = buscar_editais_pncp(data_inicial, data_final)
 
         # ---- ComprasNet (fonte secundária: federal/estadual pré-migração) ----
         brutos_cn = _coletar_comprasnet(data_inicial, data_final)
@@ -2057,11 +2193,38 @@ def main() -> None:
         logging.warning("FUNIL: editais passaram pelo keyword mas todos descartados pela qualificação geográfica. "
                         "Verifique se as filiais têm coordenadas válidas no Sheets.")
 
-    # Coleta vazia sem exceção = provável throttling no runner — marca como alerta
-    # (não "ok") para não mascarar o problema na auditoria.
+    # Decide o status da execução. ESTE status é a fonte do WATERMARK:
+    # _ler_watermark() só considera linhas com status=="ok" E brutos>0. Logo,
+    # rebaixar uma coleta PARCIAL para "alerta" aqui é exatamente o que impede o
+    # watermark de avançar sobre ela (invariante de GUARDA DE FALHA PARCIAL).
+    #
+    # Integridade da coleta (sinal de NÃO avançar o watermark), em ordem:
+    #   - exceção na execução  -> "erro"
+    #   - 0 brutos no total     -> "alerta" (coleta vazia / throttling)
+    #   - PNCP parcial          -> "alerta" (alguma modalidade não respondeu)
+    #   - backfill manual        -> nunca avança o watermark (status "ok" não é base
+    #                               de janela relativa; e _ler_watermark usa só a DATA,
+    #                               que num backfill é a de HOJE — porém a guarda real
+    #                               é não confiar em data de edital; ainda assim, por
+    #                               segurança explícita, marcamos integra=False abaixo).
+    coleta_integra = pncp_integra and not override_manual
     if not erro_execucao and len(brutos) == 0:
         erro_execucao = "coleta vazia (0 brutos) — possivel throttling/instabilidade das APIs"
         status_exec = "alerta"
+    elif not erro_execucao and not coleta_integra:
+        # brutos>0 mas coleta PARCIAL: alguma modalidade PNCP falhou (timeout/throttling)
+        # OU é um backfill manual. Em ambos os casos NÃO deixamos virar base de watermark.
+        if override_manual:
+            status_exec = "ok"  # backfill é coleta válida; mas watermark não usa override
+            # Marca a linha como backfill para que _ler_watermark a IGNORE: data_execucao
+            # de um backfill é HOJE, mas a janela coberta é histórica — se virasse
+            # watermark, criaria um gap entre a janela do backfill e hoje. (invariante 4)
+            erro_execucao = _BACKFILL_TAG
+            logging.info("Backfill manual concluído — status 'ok', marcado como backfill; o watermark NÃO é avançado por backfill.")
+        else:
+            erro_execucao = "coleta PARCIAL — alguma modalidade PNCP nao respondeu (timeout/throttling); watermark nao avanca"
+            status_exec = "alerta"
+            logging.warning("Coleta PARCIAL gravada como 'alerta' — watermark NÃO avança; próxima rodada recupera o buraco.")
     else:
         status_exec = "erro" if erro_execucao else "ok"
 
