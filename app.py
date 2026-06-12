@@ -1087,7 +1087,8 @@ def _aplica_filtros(ed: pd.DataFrame, filtros: dict) -> pd.DataFrame:
     if "distancia_km" in df.columns and filtros.get("dist_lim") is not None:
         df = df[df["distancia_km"] <= filtros["dist_lim"]]
     if filtros.get("dt_de") and filtros.get("dt_ate") and "data_abertura" in df.columns:
-        df = df[(df["data_abertura"].dt.date >= filtros["dt_de"]) & (df["data_abertura"].dt.date <= filtros["dt_ate"])]
+        _dab = pd.to_datetime(df["data_abertura"], errors="coerce").dt.date
+        df = df[(_dab >= filtros["dt_de"]) & (_dab <= filtros["dt_ate"])]
     if filtros.get("ocultar_lidos") and "numero_controle_pncp" in df.columns:
         lidos = _lidos_set()
         if lidos:
@@ -1443,7 +1444,7 @@ def _aba_editais(ed: pd.DataFrame) -> None:
                 width='stretch',
             )
         except Exception:
-            pass
+            st.caption("Excel indisponível")
     with ecol2:
         st.download_button(
             "CSV", data=df.to_csv(index=False).encode("utf-8"),
@@ -1530,8 +1531,8 @@ def _aba_editais(ed: pd.DataFrame) -> None:
         data_ab = _fmt_data(d.get("data_abertura"))
         valor = _money(d.get("valor_estimado", 0)) if d.get("valor_estimado") else "—"
         material = d.get("material") or ""
-        dist = d.get("distancia_km")
-        dist_str = f"{dist:.0f} km" if dist not in (None, "", float("nan")) and not pd.isna(dist) else "—"
+        dist = pd.to_numeric(d.get("distancia_km"), errors="coerce")
+        dist_str = f"{dist:.0f} km" if pd.notna(dist) else "—"
         filial = d.get("filial_mais_proxima") or "—"
         link_pncp = d.get("link_pncp") or ""
         link_origem = d.get("link_sistema_origem") or ""
@@ -2840,6 +2841,7 @@ def main() -> None:
         if _navc[_i].button(_nm, key=f"nav_{_nm}", width='stretch',
                             type=("primary" if st.session_state["pagina"] == _nm else "secondary")):
             st.session_state["pagina"] = _nm
+            st.session_state["f_extra"] = None   # nav manual zera o filtro one-shot do Dashboard
             st.rerun()
     st.markdown('<div style="margin-top:0.2rem;"></div>', unsafe_allow_html=True)
 

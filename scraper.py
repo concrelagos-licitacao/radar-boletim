@@ -1830,6 +1830,10 @@ def _triar_edital_ia(ed: dict, client, modelos: list[str]) -> dict | None:
         if material not in ("concreto", "brita"):
             material = None
         relevante = bool(dados.get("relevante"))
+        # Sem material nomeado (IA não confirmou concreto/brita) → NÃO promove:
+        # evita gravar obra genérica como "relevante" sem produto real definido.
+        if relevante and material is None:
+            relevante = False
         # Guarda de brita: brita só vale no RJ (mesmo que a IA diga brita em outro estado).
         if material == "brita" and ed.get("uf") not in ESTADOS_BRITA:
             relevante = False
