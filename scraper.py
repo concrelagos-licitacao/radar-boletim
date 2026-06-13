@@ -215,6 +215,33 @@ IA_GATE_MIN_CHARS = 100                                   # texto mínimo confi�
 IA_GATE_PAUSA_S   = float(os.getenv("IA_GATE_PAUSA_S", "4.5"))  # pausa entre editais (free tier = 15 req/min)
 ABA_TRIAGEM       = "Triagem IA"                          # cache das decisões da IA
 
+# =========================================================================
+# CONLICITAÇÃO — 4ª fonte (boletim .xlsx). Veredito do conselho: NÃO raspar a
+# plataforma (sessão/login frágil); consumir o BOLETIM .xlsx que o ConLicitação
+# entrega. O valor-add é o FILTRO (só PE de concreto usinado/brita) + toda a
+# inteligência (geo, score, gate IA) que já roda no pipeline. Falha silenciosa.
+# CONLICITACAO_XLSX_DIR = pasta onde o(s) .xlsx do boletim são deixados.
+CONLICITACAO_ATIVO    = os.getenv("CONLICITACAO_ATIVO", "true").lower() == "true"
+CONLICITACAO_XLSX_DIR = os.getenv("CONLICITACAO_XLSX_DIR", "")
+ABA_CONLIC            = "ConLic Lidos"                     # idempotência: nc já gravados
+# Mapa modalidade pelo PREFIXO do número do edital ConLicitação (ex.: "PE/0006/2025").
+CONLIC_MODALIDADE_PREFIXO = {
+    "PE": "Pregão Eletrônico",
+    "DL": "Dispensa",
+    "CR": "Concorrência",
+    "PR": "Pregão Presencial",
+    "SM": "Outros",
+}
+# Plataformas operacionais detectáveis no padrão "... https://(dominio) ..." do objeto.
+CONLIC_ORIGEM_DOMINIOS = (
+    ("licitar.digital", "Licitar Digital"),
+    ("licitanet", "LICITANET"),
+    ("bnccompras", "BNC"),
+    ("bllcompras", "BLL"),
+    ("jornaldolicitante", "Jornal do Licitante"),
+    ("pncp.gov.br", "PNCP"),
+)
+
 PNCP_BASE_URL = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
 PNCP_TAMANHO_PAGINA = 50    # menor que 500 para evitar timeouts
 PNCP_TIMEOUT_S = int(os.getenv("PNCP_TIMEOUT_S", "60"))
@@ -1522,6 +1549,357 @@ def _coletar_bll(data_inicial: date, data_final: date) -> list[dict]:
     return coletados
 
 
+# =========================================================================
+# CONLICITAÇÃO — 4ª fonte (boletim .xlsx)
+# =========================================================================
+# _COLMAP: variações comuns de nome de coluna -> chave canônica usada aqui.
+# TODO(conlic): o layout EXATO do .xlsx do boletim AINDA NÃO foi confirmado.
+# Quando vier um .xlsx real do ConLicitação, ABRA-O e ajuste estas variações
+# (adicione/remova nomes de coluna). Nada quebra se a coluna faltar — usamos
+# sempre row.get(...) com default "". Confirme principalmente as colunas de
+# DATAS (pode vir tudo num campo "datas" textual) e o "Nº ConLicitação".
+_COLMAP = {
+    "objeto": ("objeto", "descricao", "descrição", "objeto da licitacao", "objeto da licitação"),
+    "edital": ("edital", "numero", "número", "numero do edital", "número do edital", "n edital", "nº edital"),
+    "orgao": ("orgao", "órgão", "orgao/entidade", "órgão/entidade", "entidade", "comprador"),
+    "cidade": ("cidade", "municipio", "município", "cidade/uf", "cidade - uf", "municipio/uf"),
+    "uf": ("uf", "estado", "sigla uf"),
+    "datas": ("datas", "data", "datas importantes", "abertura", "data abertura", "prazo"),
+    "valor_estimado": ("valor_estimado", "valor", "valor estimado", "valor estimado (r$)", "valor (r$)"),
+    "nc": ("nc", "nº conlicitacao", "nº conlicitação", "n conlicitacao", "controle",
+           "numero conlicitacao", "número conlicitação", "id", "codigo", "código"),
+    "status": ("status", "situacao", "situação"),
+}
+
+
+def _conlic_get(row: dict, canon: str) -> str:
+    """Lê do dict de linha do .xlsx por chave canônica, tolerante a nomes de
+    coluna variados (case/acentos/espacos). Nunca quebra: retorna "" se faltar."""
+    # índice normalizado uma vez por linha seria mais rápido, mas o volume é baixo
+    # (um boletim tem dezenas de linhas) — mantém simples e legível.
+    norm_row = {}
+    for k, v in row.items():
+        nk = _normalize(str(k)).strip()
+        norm_row[nk] = v
+    for variante in _COLMAP.get(canon, ()):  # variantes já em minúsculo/sem acento esperado
+        nv = _normalize(variante).strip()
+        if nv in norm_row and norm_row[nv] not in (None, ""):
+            return str(norm_row[nv]).strip()
+    return ""
+
+
+def _conlic_origem_plataforma(objeto: str) -> str:
+    """Detecta a plataforma operacional pelo padrão '... https://(dominio) ...' no objeto."""
+    s = (objeto or "").lower()
+    if not s:
+        return ""
+    for dominio, rotulo in CONLIC_ORIGEM_DOMINIOS:
+        if dominio in s:
+            return rotulo
+    return ""
+
+
+def _conlic_parse_datas(texto: str) -> tuple[str, str]:
+    """Best-effort: extrai (data_abertura, data_encerramento) ISO do texto de 'datas'.
+
+    O boletim costuma trazer rótulos do tipo 'Abertura: 12/06/2026', 'Prazo: ...',
+    'Documento: ...'. Pegamos a 1ª data dd/mm/aaaa após 'Abertura' como abertura e a
+    1ª após 'Prazo'/'Encerr' como encerramento. Se nada casar, retorna ('', '').
+    Nunca quebra.
+    """
+    if not texto:
+        return "", ""
+    t = str(texto)
+
+    def _iso(m: str) -> str:
+        try:
+            d, mth, y = m.split("/")
+            if len(y) == 2:
+                y = "20" + y
+            di, mi, yi = int(d), int(mth), int(y)
+            if not (1 <= mi <= 12 and 1 <= di <= 31):
+                return ""  # data malformada (ex.: 32/13/2026) — descarta
+            return f"{yi:04d}-{mi:02d}-{di:02d}"
+        except Exception:
+            return ""
+
+    def _data_apos(rotulos: tuple) -> str:
+        for rot in rotulos:
+            m = re.search(rot + r"[^0-9]{0,20}(\d{2}/\d{2}/\d{2,4})", t, re.IGNORECASE)
+            if m:
+                iso = _iso(m.group(1))
+                if iso:
+                    return iso
+        return ""
+
+    abertura = _data_apos((r"abertura", r"sess[aã]o", r"documento"))
+    encerr = _data_apos((r"prazo", r"encerr", r"limite", r"propost"))
+    # Fallback: se só houver UMA data no texto inteiro, usa-a como abertura.
+    if not abertura and not encerr:
+        m = re.search(r"(\d{2}/\d{2}/\d{2,4})", t)
+        if m:
+            abertura = _iso(m.group(1))
+    return abertura, encerr
+
+
+def _normalizar_conlicitacao(lic: dict) -> dict | None:
+    """Converte uma licitação do boletim ConLicitação ao schema canônico do Hub.
+
+    MURO ANTICORRUPÇÃO: descarta (retorna None) se faltar objeto OU cidade/uf OU nc,
+    e descarta status terminal 'ANULADA'/'REVOGADA' (não é oportunidade viva).
+
+    Espelha 1:1 as chaves de _extrair_edital / _normalizar_bll. _cnpj/_ano/_seq
+    ficam "" (ConLic não traz PNCP estruturado) — só perde enriquecimento por itens.
+    """
+    objeto = str(lic.get("objeto") or "").strip()
+    nc = str(lic.get("nc") or "").strip()
+    cidade_raw = str(lic.get("cidade") or "").strip()
+    uf_raw = str(lic.get("uf") or "").strip().upper()
+
+    # split de 'Cidade - UF' (ou 'Cidade/UF') quando a UF não veio em coluna própria
+    municipio = cidade_raw
+    if not uf_raw and cidade_raw:
+        m = re.split(r"\s*[-/]\s*", cidade_raw)
+        if len(m) >= 2 and len(m[-1].strip()) == 2:
+            municipio = " - ".join(m[:-1]).strip()
+            uf_raw = m[-1].strip().upper()
+    elif uf_raw and cidade_raw:
+        # remove UF redundante do fim do nome da cidade, se houver
+        municipio = re.sub(r"\s*[-/]\s*" + re.escape(uf_raw) + r"\s*$", "", cidade_raw, flags=re.IGNORECASE).strip()
+    if len(uf_raw) > 2:
+        uf_raw = uf_raw[:2]
+
+    # MURO ANTICORRUPÇÃO — campos mínimos
+    if not objeto or not municipio or not uf_raw or not nc:
+        return None
+    status = str(lic.get("status") or "").strip().upper()
+    if any(t in status for t in ("ANULAD", "REVOGAD")):
+        return None
+
+    # modalidade pelo prefixo do número do edital (ex.: "PE/0006/2025")
+    edital = str(lic.get("edital") or "").strip()
+    prefixo = ""
+    m = re.match(r"\s*([A-Za-z]{2})\s*/", edital)
+    if m:
+        prefixo = m.group(1).upper()
+    modalidade = CONLIC_MODALIDADE_PREFIXO.get(prefixo, "Outros" if prefixo else "")
+
+    # valor estimado tolerante a "R$ 1.234,56"
+    valor_raw = lic.get("valor_estimado")
+    valor = 0.0
+    if valor_raw not in (None, ""):
+        try:
+            s = str(valor_raw).replace("R$", "").replace(" ", "").strip()
+            # formato brasileiro: 1.234,56 -> 1234.56
+            if "," in s:
+                s = s.replace(".", "").replace(",", ".")
+            valor = float(s)
+        except (TypeError, ValueError):
+            valor = 0.0
+
+    data_abertura, data_encerramento = _conlic_parse_datas(str(lic.get("datas") or ""))
+
+    return {
+        "numero_controle_pncp": "CONLIC-" + nc,
+        "numero_edital": edital,
+        "modalidade": modalidade,
+        "orgao": str(lic.get("orgao") or "").strip(),
+        "esfera": "Municipal",  # best-effort: o boletim ConLic é majoritariamente municipal
+        "municipio": municipio,
+        "uf": uf_raw,
+        "objeto": objeto,
+        "valor_estimado": valor,
+        "data_abertura": data_abertura,
+        "data_encerramento": data_encerramento,
+        "link_pncp": "",
+        "link_sistema_origem": "",
+        "fonte": "CONLICITACAO",
+        "origem_plataforma": _conlic_origem_plataforma(objeto),
+        "_cnpj": "",
+        "_ano_compra": "",
+        "_seq_compra": "",
+        "itens_encontrados": "",
+    }
+
+
+def _filtrar_pe_conlicitacao(editais: list[dict]) -> list[dict]:
+    """Mantém SÓ Pregão Eletrônico (prefixo PE/) e passa pelo filtro de keyword/estado/valor
+    já existente (concreto score-3, brita-só-RJ, veto asfalto/CBUQ, exclusão tubo/bloco/pré-moldado).
+
+    É AQUI que mora o valor-add da 4ª fonte: o boletim ConLicitação é genérico; nós só
+    queremos PE de concreto usinado / brita. Retorna apenas os sobreviventes."""
+    so_pe = [ed for ed in editais if ed.get("modalidade") == "Pregão Eletrônico"]
+    if not so_pe:
+        return []
+    return filtrar_por_keyword_estado_valor(so_pe)
+
+
+def _parse_boletim_xlsx(caminho: str) -> list[dict]:
+    """Lê um .xlsx de boletim do ConLicitação e devolve list[dict] de linhas brutas
+    (chaves canônicas: objeto, edital, orgao, cidade, uf, datas, valor_estimado, nc, status).
+
+    TOLERANTE: usa pandas+openpyxl, mapeia nomes de coluna via _COLMAP, e NUNCA quebra
+    se faltar coluna (row.get -> ""). Lança ValueError se o arquivo claramente NÃO é um
+    boletim (sem nenhuma das colunas-âncora objeto/edital/nc) — o caller usa isso para
+    LOG ALTO de 'sessão/arquivo inválido' em vez de silêncio.
+    """
+    import pandas as pd  # import tardio: pandas já é dependência; evita custo no import do módulo
+    df = pd.read_excel(caminho, dtype=str, engine="openpyxl")
+    df = df.fillna("")
+    linhas: list[dict] = []
+    registros = df.to_dict(orient="records")
+
+    # Detecção de arquivo inválido: nenhuma âncora reconhecível em NENHUMA linha.
+    def _tem_ancora(row: dict) -> bool:
+        return bool(_conlic_get(row, "objeto") or _conlic_get(row, "edital") or _conlic_get(row, "nc"))
+
+    if registros and not any(_tem_ancora(r) for r in registros):
+        raise ValueError(
+            "nenhuma coluna-âncora (objeto/edital/nc) reconhecida — "
+            "não parece um boletim ConLicitação (ver _COLMAP/TODO)"
+        )
+
+    for row in registros:
+        linhas.append({
+            "objeto": _conlic_get(row, "objeto"),
+            "edital": _conlic_get(row, "edital"),
+            "orgao": _conlic_get(row, "orgao"),
+            "cidade": _conlic_get(row, "cidade"),
+            "uf": _conlic_get(row, "uf"),
+            "datas": _conlic_get(row, "datas"),
+            "valor_estimado": _conlic_get(row, "valor_estimado"),
+            "nc": _conlic_get(row, "nc"),
+            "status": _conlic_get(row, "status"),
+        })
+    return linhas
+
+
+def _carregar_conlic_lidos(sheet_id: str) -> set:
+    """Carrega o set de 'CONLIC-'+nc já processados (aba 'ConLic Lidos').
+    Falha silenciosa → set() (degrada sem quebrar se não houver Sheets)."""
+    lidos: set = set()
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        ws = gc.open_by_key(sheet_id).worksheet(ABA_CONLIC)
+        for r in ws.get_all_records():
+            nc = str(r.get("numero_controle_pncp", "")).strip()
+            if nc:
+                lidos.add(nc)
+    except Exception:
+        pass
+    return lidos
+
+
+def _gravar_conlic_lidos(sheet_id: str, linhas: list[list]) -> None:
+    """Grava (append batched) os 'CONLIC-'+nc recém-processados na aba 'ConLic Lidos'.
+    Cria a aba se faltar. Falha silenciosa (apenas log)."""
+    if not linhas:
+        return
+    header = ["numero_controle_pncp", "data_leitura", "arquivo"]
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet(ABA_CONLIC)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=ABA_CONLIC, rows=2000, cols=len(header))
+            ws.append_row(header, value_input_option="USER_ENTERED")
+        vals = ws.get_all_values()
+        if not vals:
+            ws.append_row(header, value_input_option="USER_ENTERED")
+        ws.append_rows(linhas, value_input_option="USER_ENTERED")
+    except Exception as exc:
+        logging.warning("Não foi possível gravar 'ConLic Lidos': %s", exc)
+
+
+# Estado de coleta exportado para main() decidir o status 'alerta'
+# (arquivo novo presente mas parse=0 não pode virar '0 silencioso').
+_CONLIC_ALERTA = {"arquivo_novo_sem_parse": False}
+
+
+def _coletar_conlicitacao(sheet_id: str = "") -> list[dict]:
+    """Coleta a 4ª fonte: varre os .xlsx NOVOS da pasta CONLICITACAO_XLSX_DIR,
+    parseia, normaliza, FILTRA (só PE de concreto usinado/brita) e retorna.
+
+    Idempotência: a aba 'ConLic Lidos' guarda os 'CONLIC-'+nc já gravados; itens já
+    vistos são pulados. Falha silenciosa estilo _coletar_bll (try/except -> [] em erro).
+    DETECÇÃO de arquivo inválido: parse que falha como boletim gera LOG ALTO (não silêncio).
+    ALARME: arquivo novo presente mas parse=0 marca _CONLIC_ALERTA p/ status 'alerta'.
+    """
+    _CONLIC_ALERTA["arquivo_novo_sem_parse"] = False
+    if not CONLICITACAO_ATIVO or not CONLICITACAO_XLSX_DIR:
+        return []
+    try:
+        pasta = Path(CONLICITACAO_XLSX_DIR)
+        if not pasta.is_dir():
+            logging.warning("ConLicitação: CONLICITACAO_XLSX_DIR=%r não é uma pasta válida — pulando.",
+                            CONLICITACAO_XLSX_DIR)
+            return []
+
+        arquivos = sorted(
+            [p for p in pasta.glob("*.xlsx") if not p.name.startswith("~$")]
+        )
+        if not arquivos:
+            return []
+
+        lidos = _carregar_conlic_lidos(sheet_id) if sheet_id else set()
+        coletados: list[dict] = []
+        viu_arquivo_com_linhas = False
+        novos_lidos: list[list] = []
+        ts = datetime.now().isoformat(timespec="seconds")
+
+        for caminho in arquivos:
+            try:
+                linhas = _parse_boletim_xlsx(str(caminho))
+            except ValueError as exc:
+                # arquivo presente mas NÃO é um boletim válido → LOG ALTO (não silencioso)
+                logging.error("ConLicitação: arquivo %s NÃO parseou como boletim (sessão/arquivo inválido?): %s",
+                              caminho.name, exc)
+                continue
+            except Exception as exc:
+                logging.warning("ConLicitação: falha ao ler %s: %s — pulando arquivo.", caminho.name, exc)
+                continue
+
+            if linhas:
+                viu_arquivo_com_linhas = True
+
+            for lic in linhas:
+                ed = _normalizar_conlicitacao(lic)
+                if ed is None:
+                    continue
+                if ed["numero_controle_pncp"] in lidos:
+                    continue  # idempotência: já gravado numa rodada anterior
+                lidos.add(ed["numero_controle_pncp"])
+                coletados.append(ed)
+
+        # FILTRO (valor-add): só PE de concreto usinado / brita
+        filtrados = _filtrar_pe_conlicitacao(coletados)
+
+        # Idempotência: marca como lidos os que SOBREVIVERAM ao filtro (entram no funil).
+        for ed in filtrados:
+            novos_lidos.append([ed["numero_controle_pncp"], ts, "boletim"])
+        if sheet_id and novos_lidos:
+            _gravar_conlic_lidos(sheet_id, novos_lidos)
+
+        # ALARME: havia arquivo novo COM linhas, mas nada sobreviveu → não é '0 silencioso'.
+        # (0 após filtro pode ser legítimo — boletim sem concreto/brita —, mas se NEM o
+        # parse bruto produziu candidatos, isso é suspeito de layout/coluna errados.)
+        if viu_arquivo_com_linhas and not coletados:
+            _CONLIC_ALERTA["arquivo_novo_sem_parse"] = True
+            logging.warning("ConLicitação: arquivo(s) novo(s) presentes mas 0 licitações normalizadas "
+                            "(layout/coluna do .xlsx pode ter mudado — ver _COLMAP/TODO).")
+
+        if filtrados:
+            logging.info("ConLicitação: %d licitações (PE concreto/brita) de %d arquivo(s) de boletim.",
+                         len(filtrados), len(arquivos))
+        return filtrados
+    except Exception as exc:
+        logging.warning("ConLicitação: erro inesperado na coleta (%s) — pulando fonte.", exc)
+        return []
+
+
 def _deduplicar_fontes(editais: list[dict]) -> list[dict]:
     """Remove duplicatas entre fontes, priorizando PNCP quando o mesmo edital aparecer em múltiplas fontes."""
     vistos: set[str] = set()
@@ -2162,11 +2540,14 @@ def main() -> None:
         # ---- BLL (fonte terciária: municípios SP/MG/PR/RJ) ----
         brutos_bll = _coletar_bll(data_inicial, data_final)
 
-        # Consolida e deduplica — PNCP tem precedência
-        brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll)
+        # ---- ConLicitação (4ª fonte: boletim .xlsx; já FILTRADA p/ PE concreto/brita) ----
+        brutos_conlic = _coletar_conlicitacao(sheet_id)
+
+        # Consolida e deduplica — PNCP tem precedência (vem 1º no concat; ConLic por último).
+        brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll + brutos_conlic)
         logging.info(
-            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d -> deduplicado=%d editais brutos",
-            len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos),
+            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d + ConLic=%d -> deduplicado=%d editais brutos",
+            len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos_conlic), len(brutos),
         )
 
         pre = filtrar_por_keyword_estado_valor(brutos)
@@ -2227,6 +2608,17 @@ def main() -> None:
             logging.warning("Coleta PARCIAL gravada como 'alerta' — watermark NÃO avança; próxima rodada recupera o buraco.")
     else:
         status_exec = "erro" if erro_execucao else "ok"
+
+    # ALARME ConLicitação: arquivo novo de boletim presente, mas 0 licitações
+    # normalizadas (layout/coluna do .xlsx mudou) → rebaixa 'ok' para 'alerta'.
+    # NÃO mexe em coleta 'erro'/'alerta' já decidida e NÃO segura o watermark do PNCP
+    # (coerente com BLL/ComprasNet: a 4ª fonte é auxiliar). É só um sinal de saúde.
+    if status_exec == "ok" and _CONLIC_ALERTA.get("arquivo_novo_sem_parse"):
+        status_exec = "alerta"
+        if not erro_execucao:
+            erro_execucao = ("ConLicitação: boletim .xlsx novo presente mas 0 licitações "
+                             "parseadas (layout/coluna pode ter mudado — ver _COLMAP/TODO)")
+        logging.warning("Status rebaixado para 'alerta' por ConLicitação (boletim novo sem parse).")
 
     # Grava execução na aba "Execucoes" do Sheets (auditoria permanente)
     _gravar_execucao_sheets(sheet_id, {
