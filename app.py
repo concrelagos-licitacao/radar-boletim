@@ -1318,10 +1318,61 @@ def _exportar_excel(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
+def _secao_importar_conlicitacao() -> None:
+    """Upload do boletim .xlsx do ConLicitação — qualquer pessoa do setor, qualquer máquina,
+    via web. Aplica o filtro do Hub (só PE de concreto/brita) + geo, e grava no boletim.
+    Reusa as funções do scraper; reimportar o mesmo boletim não duplica (gravar_em_sheets dedup)."""
+    import io
+    with st.expander("📥 Importar boletim do ConLicitação (.xlsx)"):
+        st.caption("No ConLicitação, abra o boletim, clique em **Gerar .xlsx** e suba o arquivo aqui. "
+                   "O Hub mantém só os **Pregões Eletrônicos de concreto usinado/brita**, aplica geografia "
+                   "(filial no mesmo estado) e a inteligência. Funciona de qualquer máquina; "
+                   "subir o mesmo boletim de novo não duplica.")
+        up = st.file_uploader("Boletim .xlsx exportado do ConLicitação", type=["xlsx"], key="conlic_xlsx_up")
+        if up is not None and st.button("Importar boletim", type="primary", key="conlic_import_btn"):
+            try:
+                import scraper as _sc
+            except Exception as exc:
+                st.error(f"Não consegui carregar o módulo de coleta: {exc}")
+                return
+            with st.spinner("Lendo o boletim, filtrando e qualificando…"):
+                try:
+                    rows = _sc._parse_boletim_xlsx(io.BytesIO(up.getvalue()))
+                except ValueError:
+                    st.error("Esse arquivo não parece um boletim do ConLicitação (colunas não reconhecidas).")
+                    return
+                except Exception as exc:
+                    st.error(f"Não consegui ler o .xlsx: {exc}")
+                    return
+                editais = [e for e in (_sc._normalizar_conlicitacao(r) for r in rows) if e]
+                editais = _sc._filtrar_pe_conlicitacao(editais)
+                if not editais:
+                    st.warning(f"{len(rows)} licitações no boletim, mas **nenhuma é Pregão Eletrônico de "
+                               "concreto usinado/brita** — nada a importar (o resto é asfalto, material geral, "
+                               "outra modalidade, etc.).")
+                    return
+                sid = _get_sheet_id()
+                filiais = _sc.carregar_filiais(sid)
+                qualificados = _sc.qualificar_por_distancia(editais, filiais)
+                novos = _sc.gravar_em_sheets(qualificados, sid)
+            cert = sum(1 for e in qualificados if int(e.get("score") or 0) >= 2)
+            poss = len(qualificados) - cert
+            st.success(
+                f"Boletim importado: **{len(rows)}** licitações → **{len(editais)}** PE concreto/brita → "
+                f"**{len(qualificados)}** atendidas por filial no mesmo estado → **{len(novos)} novas** no boletim "
+                f"({cert} CERTO · {poss} POSSÍVEL)."
+            )
+            if novos:
+                st.cache_data.clear()
+                st.info("Clique em **Boletim** de novo (ou recarregue) para vê-las na lista.")
+
+
 def _aba_editais(ed: pd.DataFrame) -> None:
+    _secao_importar_conlicitacao()
     if ed.empty:
         st.subheader("Boletim de Licitações")
-        st.info("Nenhuma licitação ainda. Rode `python scraper.py` para popular.")
+        st.info("Nenhuma licitação ainda. Importe um boletim do ConLicitação acima, "
+                "ou rode `python scraper.py` para popular pelo PNCP.")
         return
 
     # ===== Cabeçalho do boletim (estilo ConLicitação) =====

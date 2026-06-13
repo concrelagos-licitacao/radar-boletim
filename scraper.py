@@ -1559,16 +1559,24 @@ def _coletar_bll(data_inicial: date, data_final: date) -> list[dict]:
 # sempre row.get(...) com default "". Confirme principalmente as colunas de
 # DATAS (pode vir tudo num campo "datas" textual) e o "Nº ConLicitação".
 _COLMAP = {
+    # Confirmado contra o .xlsx real do boletim (abas 'Licitações'/'Acompanhamentos'):
+    # colunas — Número ConLicitação, Código, Órgão, Endereço, Cidade, Estado, CEP,
+    # Edital, Site 1, Site 2, Processo, Valor Estimado, Itens, Situação, Documento,
+    # Abertura, Prazo, Objeto, Observação, Anexos, Atualizada em.
     "objeto": ("objeto", "descricao", "descrição", "objeto da licitacao", "objeto da licitação"),
     "edital": ("edital", "numero", "número", "numero do edital", "número do edital", "n edital", "nº edital"),
     "orgao": ("orgao", "órgão", "orgao/entidade", "órgão/entidade", "entidade", "comprador"),
     "cidade": ("cidade", "municipio", "município", "cidade/uf", "cidade - uf", "municipio/uf"),
-    "uf": ("uf", "estado", "sigla uf"),
-    "datas": ("datas", "data", "datas importantes", "abertura", "data abertura", "prazo"),
-    "valor_estimado": ("valor_estimado", "valor", "valor estimado", "valor estimado (r$)", "valor (r$)"),
-    "nc": ("nc", "nº conlicitacao", "nº conlicitação", "n conlicitacao", "controle",
-           "numero conlicitacao", "número conlicitação", "id", "codigo", "código"),
-    "status": ("status", "situacao", "situação"),
+    "uf": ("estado", "uf", "sigla uf"),
+    # No .xlsx as datas vêm em COLUNAS separadas (Abertura/Prazo, já em datetime);
+    # 'datas' é o fallback p/ o blob textual do HTML.
+    "data_abertura": ("abertura", "data abertura", "data de abertura", "sessao", "sessão"),
+    "data_encerramento": ("prazo", "encerramento", "data encerramento", "limite", "documento"),
+    "datas": ("datas", "datas importantes"),
+    "valor_estimado": ("valor estimado", "valor_estimado", "valor", "valor estimado (r$)", "valor (r$)"),
+    "nc": ("numero conlicitacao", "número conlicitação", "nº conlicitacao", "nº conlicitação",
+           "n conlicitacao", "nc", "controle"),  # NÃO 'codigo' (é o código do órgão)
+    "status": ("situacao", "situação", "status"),
 }
 
 
@@ -1697,7 +1705,11 @@ def _normalizar_conlicitacao(lic: dict) -> dict | None:
         except (TypeError, ValueError):
             valor = 0.0
 
-    data_abertura, data_encerramento = _conlic_parse_datas(str(lic.get("datas") or ""))
+    # Datas: preferir as colunas separadas do .xlsx (Abertura/Prazo); fallback ao blob 'datas' do HTML
+    data_abertura = _conlic_iso_data(lic.get("data_abertura"))
+    data_encerramento = _conlic_iso_data(lic.get("data_encerramento"))
+    if not data_abertura and not data_encerramento:
+        data_abertura, data_encerramento = _conlic_parse_datas(str(lic.get("datas") or ""))
 
     return {
         "numero_controle_pncp": "CONLIC-" + nc,
@@ -1766,12 +1778,34 @@ def _parse_boletim_xlsx(caminho: str) -> list[dict]:
             "orgao": _conlic_get(row, "orgao"),
             "cidade": _conlic_get(row, "cidade"),
             "uf": _conlic_get(row, "uf"),
+            # colunas de data separadas do .xlsx (datetime); 'datas' é fallback do HTML
+            "data_abertura": _conlic_get(row, "data_abertura"),
+            "data_encerramento": _conlic_get(row, "data_encerramento"),
             "datas": _conlic_get(row, "datas"),
             "valor_estimado": _conlic_get(row, "valor_estimado"),
             "nc": _conlic_get(row, "nc"),
             "status": _conlic_get(row, "status"),
         })
     return linhas
+
+
+def _conlic_iso_data(v) -> str:
+    """Normaliza uma data do .xlsx para ISO (YYYY-MM-DD). Aceita '2026-06-17 09:29:00',
+    'dd/mm/aaaa' e 'Não informado'/vazio (-> ''). Nunca quebra."""
+    s = str(v or "").strip()
+    if not s or "informad" in s.lower():
+        return ""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        return m.group(0)
+    m = re.match(r"(\d{2})/(\d{2})/(\d{2,4})", s)
+    if m:
+        d, mth, y = m.group(1), m.group(2), m.group(3)
+        if len(y) == 2:
+            y = "20" + y
+        if 1 <= int(mth) <= 12 and 1 <= int(d) <= 31:
+            return f"{y}-{mth}-{d}"
+    return ""
 
 
 def _carregar_conlic_lidos(sheet_id: str) -> set:
