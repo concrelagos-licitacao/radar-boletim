@@ -2514,9 +2514,20 @@ _PROMPT_HAB = (
     "HABILITAÇÃO do edital. Hoje é {HOJE}; a sessão do pregão é em {SESSAO}. Os NOMES dos arquivos costumam "
     "indicar o tipo e a validade (ex.: 'CERTIDAO FEDERAL - VENC 21-05-2024.pdf'): considere VENCIDO todo "
     "documento cuja validade termine antes da sessão. Não deixe passar NADA que possa inabilitar.\n"
+    "REGRAS OBRIGATÓRIAS antes de concluir:\n"
+    "1. LEIA O TEXTO DO EDITAL POR INTEIRO (fornecido abaixo) — baseie CADA conclusão no que o edital REALMENTE "
+    "exige, não em suposição. As exigências extraídas são só um resumo; o edital manda.\n"
+    "2. SEDE E FILIAL: muitos editais exigem certidões — em especial a CERTIDÃO DE FALÊNCIA/CONCORDATA/RECUPERAÇÃO "
+    "JUDICIAL e a qualificação econômico-financeira — TANTO da FILIAL participante QUANTO da MATRIZ/SEDE (CNPJ raiz). "
+    "Quando o edital pedir, cobre AS DUAS: marque 'faltante' se só a da filial OU só a da sede estiver presente, e "
+    "deixe explícito na obs que falta a da sede (ou da filial).\n"
+    "3. NÃO ACUSE discrepância de razão social, CNPJ ou 'erro material' (ex.: 'LTDA' vs 'S/A') A MENOS QUE o edital "
+    "EXIJA correspondência exata E o documento claramente divirja do exigido. Na dúvida, use status 'verificar' com "
+    "uma obs curta ('conferir se o edital aceita...'), NUNCA uma afirmação de erro. Razão social muda com o tempo "
+    "(LTDA→S/A) e geralmente não inabilita — só vira problema se o edital for expresso.\n"
     "Responda APENAS com JSON válido, sem markdown:\n"
     '{"mapeamento": [{"item_edital": "8.1", "exigencia": "nome curto", '
-    '"documento": "arquivo.pdf que atende, ou FALTANTE", "status": "ok|vencido|incompleto|faltante", '
+    '"documento": "arquivo.pdf que atende, ou FALTANTE", "status": "ok|vencido|incompleto|faltante|verificar", '
     '"obs": "1 frase curta quando necessário"}],\n'
     ' "faltantes": [{"item_edital": "8.3", "exigencia": "ATA", "como_resolver": "onde/como obter ou gerar"}],\n'
     ' "habilitado_100": true|false,\n'
@@ -2524,13 +2535,15 @@ _PROMPT_HAB = (
 )
 
 
-def _verificar_habilitacao(d, analise: dict, docs_ctx: str) -> dict | None:
+def _verificar_habilitacao(d, analise: dict, docs_ctx: str, edital_txt: str = "") -> dict | None:
     import json
     data_sessao = _fmt_data(d.get("data_abertura"))
     docs_exig = (analise or {}).get("documentos") or {}
     prompt = (
         _PROMPT_HAB.replace("{HOJE}", datetime.now().strftime("%d/%m/%Y")).replace("{SESSAO}", str(data_sessao))
-        + "\n=== EXIGÊNCIAS DO EDITAL (extraídas pela análise) ===\n"
+        + "\n=== TEXTO DO EDITAL (leia por inteiro — é a fonte da verdade) ===\n"
+        + (edital_txt or "(texto do edital indisponível — baseie-se só nas exigências extraídas e seja conservador)")[:40000]
+        + "\n\n=== EXIGÊNCIAS DO EDITAL (resumo extraído pela análise) ===\n"
         + json.dumps(docs_exig, ensure_ascii=False)[:12000]
         + "\n\n=== DOCUMENTOS DISPONÍVEIS ===\n" + (docs_ctx or "(nenhum documento carregado)")[:30000]
     )
@@ -2617,7 +2630,8 @@ def _secao_habilitacao(nc: str, d, dados: dict) -> None:
                    + (" …" if len(nomes) > 8 else ""))
         if st.button("Verificar habilitação", type="primary", key=f"vh_{nc}"):
             with st.spinner("Conferindo exigência por exigência (8.1, 8.2, …)…"):
-                vh = _verificar_habilitacao(d, dados, st.session_state.get(f"docsctx_{nc}", ""))
+                vh = _verificar_habilitacao(d, dados, st.session_state.get(f"docsctx_{nc}", ""),
+                                            st.session_state.get(f"txt_{nc}", ""))
             if vh:
                 st.session_state[f"hab_{nc}"] = vh
         vh = st.session_state.get(f"hab_{nc}")
@@ -2626,7 +2640,8 @@ def _secao_habilitacao(nc: str, d, dados: dict) -> None:
                 st.success("**100% HABILITADOS** — todos os documentos cobrem as exigências do edital.")
             mapa = vh.get("mapeamento") or []
             if mapa:
-                _ic = {"ok": "✓ OK", "vencido": "VENCIDO", "incompleto": "INCOMPLETO", "faltante": "FALTANTE"}
+                _ic = {"ok": "✓ OK", "vencido": "VENCIDO", "incompleto": "INCOMPLETO",
+                       "faltante": "FALTANTE", "verificar": "VERIFICAR"}
                 st.markdown("\n".join(
                     f"- **{m.get('item_edital', '?')} – {m.get('exigencia', '')}** → "
                     f"{m.get('documento', '')} **[{_ic.get(str(m.get('status', '')).lower(), m.get('status', ''))}]**"
