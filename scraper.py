@@ -224,6 +224,7 @@ ABA_TRIAGEM       = "Triagem IA"                          # cache das decisões 
 CONLICITACAO_ATIVO    = os.getenv("CONLICITACAO_ATIVO", "true").lower() == "true"
 CONLICITACAO_XLSX_DIR = os.getenv("CONLICITACAO_XLSX_DIR", "")
 ABA_CONLIC            = "ConLic Lidos"                     # idempotência: nc já gravados
+ABA_CONLIC_INBOX      = "ConLic Inbox"                     # transporte automático (Apps Script)
 # Mapa modalidade pelo PREFIXO do número do edital ConLicitação (ex.: "PE/0006/2025").
 CONLIC_MODALIDADE_PREFIXO = {
     "PE": "Pregão Eletrônico",
@@ -1934,6 +1935,83 @@ def _coletar_conlicitacao(sheet_id: str = "") -> list[dict]:
         return []
 
 
+def _coletar_conlicitacao_inbox(sheet_id: str = "") -> list[dict]:
+    """Coleta ConLicitação pelo caminho AUTOMÁTICO: a aba 'ConLic Inbox', onde o
+    bookmarklet (via Apps Script) faz appendRow de cada licitação do boletim.
+
+    Espelha _coletar_conlicitacao: lê as linhas com processado_em vazio, normaliza,
+    aplica idempotência ('CONLIC-'+nc na aba 'ConLic Lidos') e FILTRA (só PE de
+    concreto usinado/brita). Marca as linhas consumidas com timestamp em processado_em.
+    Falha silenciosa estilo do arquivo (try/except -> [] em erro).
+    ALARME: havia linha nova mas 0 normalizadas -> _CONLIC_ALERTA p/ status 'alerta'.
+    """
+    if not sheet_id:
+        return []
+    try:
+        creds_path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH", "credenciais/service_account.json")
+        gc = gspread.service_account(filename=creds_path)
+        ws = gc.open_by_key(sheet_id).worksheet(ABA_CONLIC_INBOX)
+        registros = ws.get_all_records()
+    except Exception:
+        return []  # aba inexistente / qualquer erro -> falha silenciosa
+
+    if not registros:
+        return []
+
+    campos = ("objeto", "nc", "cidade", "uf", "edital", "valor_estimado",
+              "orgao", "datas", "data_abertura", "data_encerramento", "status")
+
+    lidos = _carregar_conlic_lidos(sheet_id)
+    coletados: list[dict] = []
+    viu_linha_nova = False
+    linhas_processadas: list[int] = []   # nº da linha na planilha (1-based, header = linha 1)
+
+    for i, row in enumerate(registros, start=2):  # linha 1 = header
+        if str(row.get("processado_em", "")).strip():
+            continue  # já consumida numa rodada anterior
+        viu_linha_nova = True
+        linhas_processadas.append(i)
+        lic = {c: row.get(c, "") for c in campos}
+        ed = _normalizar_conlicitacao(lic)
+        if ed is None:
+            continue
+        if ed["numero_controle_pncp"] in lidos:
+            continue  # idempotência: já no funil
+        lidos.add(ed["numero_controle_pncp"])
+        coletados.append(ed)
+
+    # FILTRO (valor-add): só PE de concreto usinado / brita
+    filtrados = _filtrar_pe_conlicitacao(coletados)
+
+    # Idempotência: marca como lidos os que SOBREVIVERAM ao filtro (entram no funil).
+    ts = datetime.now().isoformat(timespec="seconds")
+    novos_lidos = [[ed["numero_controle_pncp"], ts, "inbox"] for ed in filtrados]
+    if novos_lidos:
+        _gravar_conlic_lidos(sheet_id, novos_lidos)
+
+    # Marca processado_em nas linhas consumidas (idempotência por 'ConLic Lidos' já
+    # protege o funil; se a marcação falhar, apenas loga).
+    if linhas_processadas:
+        try:
+            header = ws.row_values(1)
+            col = header.index("processado_em") + 1  # 1-based
+            for linha in linhas_processadas:
+                ws.update_cell(linha, col, ts)
+        except Exception as exc:
+            logging.warning("ConLic Inbox: não foi possível marcar processado_em: %s", exc)
+
+    # ALARME: linha(s) nova(s) presente(s) mas 0 normalizadas -> não é '0 silencioso'.
+    if viu_linha_nova and not coletados:
+        _CONLIC_ALERTA["arquivo_novo_sem_parse"] = True
+        logging.warning("ConLic Inbox: linha(s) nova(s) na aba mas 0 licitações normalizadas "
+                        "(contrato/colunas do appendRow podem ter mudado).")
+
+    if filtrados:
+        logging.info("ConLic Inbox: %d licitações (PE concreto/brita) de %d linha(s) nova(s).",
+                     len(filtrados), len(linhas_processadas))
+    return filtrados
+
+
 def _deduplicar_fontes(editais: list[dict]) -> list[dict]:
     """Remove duplicatas entre fontes, priorizando PNCP quando o mesmo edital aparecer em múltiplas fontes."""
     vistos: set[str] = set()
@@ -2576,12 +2654,14 @@ def main() -> None:
 
         # ---- ConLicitação (4ª fonte: boletim .xlsx; já FILTRADA p/ PE concreto/brita) ----
         brutos_conlic = _coletar_conlicitacao(sheet_id)
+        # ---- ConLic Inbox (mesma 4ª fonte, caminho automático via Apps Script) ----
+        brutos_conlic_inbox = _coletar_conlicitacao_inbox(sheet_id)
 
         # Consolida e deduplica — PNCP tem precedência (vem 1º no concat; ConLic por último).
-        brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll + brutos_conlic)
+        brutos = _deduplicar_fontes(brutos_pncp + brutos_cn + brutos_bll + brutos_conlic + brutos_conlic_inbox)
         logging.info(
-            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d + ConLic=%d -> deduplicado=%d editais brutos",
-            len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos_conlic), len(brutos),
+            "Multi-fonte: PNCP=%d + ComprasNet=%d + BLL=%d + ConLic=%d + ConLicInbox=%d -> deduplicado=%d editais brutos",
+            len(brutos_pncp), len(brutos_cn), len(brutos_bll), len(brutos_conlic), len(brutos_conlic_inbox), len(brutos),
         )
 
         pre = filtrar_por_keyword_estado_valor(brutos)

@@ -1367,8 +1367,93 @@ def _secao_importar_conlicitacao() -> None:
                 st.info("Clique em **Boletim** de novo (ou recarregue) para vê-las na lista.")
 
 
+def _carregar_bookmarklet() -> str:
+    """Lê a linha minificada (javascript:…) de web/conlic_bookmarklet.js — fonte única
+    da verdade do favorito. Retorna "" se não achar (degrada sem quebrar a página)."""
+    try:
+        import os
+        cam = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "conlic_bookmarklet.js")
+        with open(cam, encoding="utf-8") as f:
+            for linha in f:
+                if linha.strip().startswith("javascript:"):
+                    return linha.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _secao_limpar_conlicitacao() -> None:
+    """Importação por 1 clique, sem token: o usuário faz login no ConLicitação, abre o boletim,
+    clica no favorito "Limpar ConLicitação" (que copia os editais como JSON) e cola aqui.
+    Mesmo pipeline do upload .xlsx — só PE de concreto/brita + geo + dedup."""
+    with st.expander("🧹 Limpar ConLicitação (1 clique, sem token)"):
+        st.caption("Faça **login** no ConLicitação, abra o **boletim** e clique no favorito "
+                   "**Limpar ConLicitação** — ele copia os editais. Cole abaixo e clique **Processar**. "
+                   "O Hub mantém só os **PE de concreto/brita**, aplica geografia e não duplica.")
+        st.link_button("Abrir ConLicitação", "https://consulteonline.conlicitacao.com.br/",
+                       help="Abre o ConLicitação em outra aba. Faça login e abra o boletim antes de copiar.")
+        st.caption("**Instalar o favorito (só na 1ª vez):** crie um novo favorito no navegador e cole "
+                   "TODO o código abaixo no campo de **URL/endereço** do favorito (não na barra de busca).")
+        _bm = _carregar_bookmarklet()
+        if _bm:
+            st.code(_bm, language="javascript")
+        else:
+            st.caption("⚠️ Favorito indisponível — veja `web/conlic_bookmarklet.js`.")
+        txt = st.text_area("Cole aqui os editais copiados (JSON)", key="conlic_paste")
+        if st.button("Processar", type="primary", key="conlic_paste_btn"):
+            import json
+            if not (txt or "").strip():
+                st.error("Cole primeiro o JSON copiado pelo favorito **Limpar ConLicitação**.")
+                return
+            try:
+                data = json.loads(txt)
+            except Exception:
+                st.error("O texto colado não é um JSON válido. Copie de novo pelo favorito e cole inteiro.")
+                return
+            if isinstance(data, dict):
+                rows = data.get("licitacoes")
+            else:
+                rows = data
+            if not isinstance(rows, list) or not rows:
+                st.error("Não encontrei a lista de licitações no JSON colado "
+                         "(esperado uma lista ou um objeto com a chave `licitacoes`).")
+                return
+            try:
+                import scraper as _sc
+            except Exception as exc:
+                st.error(f"Não consegui carregar o módulo de coleta: {exc}")
+                return
+            with st.spinner("Lendo os editais colados, filtrando e qualificando…"):
+                try:
+                    editais = [e for e in (_sc._normalizar_conlicitacao(r) for r in rows) if e]
+                    editais = _sc._filtrar_pe_conlicitacao(editais)
+                    if not editais:
+                        st.warning(f"{len(rows)} licitações coladas, mas **nenhuma é Pregão Eletrônico de "
+                                   "concreto usinado/brita** — nada a importar (o resto é asfalto, material "
+                                   "geral, outra modalidade, etc.).")
+                        return
+                    sid = _get_sheet_id()
+                    filiais = _sc.carregar_filiais(sid)
+                    qualificados = _sc.qualificar_por_distancia(editais, filiais)
+                    novos = _sc.gravar_em_sheets(qualificados, sid)
+                except Exception as exc:
+                    st.error(f"Não consegui processar os editais colados: {exc}")
+                    return
+            cert = sum(1 for e in qualificados if int(e.get("score") or 0) >= 2)
+            poss = len(qualificados) - cert
+            st.success(
+                f"Editais processados: **{len(rows)}** licitações → **{len(editais)}** PE concreto/brita → "
+                f"**{len(qualificados)}** atendidas por filial no mesmo estado → **{len(novos)} novas** no boletim "
+                f"({cert} CERTO · {poss} POSSÍVEL)."
+            )
+            if novos:
+                st.cache_data.clear()
+                st.info("Clique em **Boletim** de novo (ou recarregue) para vê-las na lista.")
+
+
 def _aba_editais(ed: pd.DataFrame) -> None:
     _secao_importar_conlicitacao()
+    _secao_limpar_conlicitacao()
     if ed.empty:
         st.subheader("Boletim de Licitações")
         st.info("Nenhuma licitação ainda. Importe um boletim do ConLicitação acima, "
