@@ -1382,73 +1382,148 @@ def _carregar_bookmarklet() -> str:
     return ""
 
 
+def _bookmarklet_personalizado(url: str, token: str) -> str:
+    """Devolve o favorito com SCRIPT_URL e TOKEN já preenchidos (modo automático)."""
+    base = _carregar_bookmarklet()
+    if not base:
+        return ""
+    return (base
+            .replace("COLE_AQUI_A_URL_DO_APPS_SCRIPT", (url or "").strip())
+            .replace("COLE_AQUI_O_TOKEN", (token or "").strip()))
+
+
+def _conlic_qualificar_gravar(editais: list, origem: str) -> None:
+    """Tail comum dos dois modos: geografia → grava → mostra funil.
+    `editais` já saíram FILTRADOS (PE concreto/brita) do normalizador/filtro."""
+    try:
+        import scraper as _sc
+    except Exception as exc:
+        st.error(f"Não consegui carregar o módulo de coleta: {exc}")
+        return
+    sid = _get_sheet_id()
+    with st.spinner("Qualificando por geografia e gravando…"):
+        try:
+            filiais = _sc.carregar_filiais(sid)
+            qualificados = _sc.qualificar_por_distancia(editais, filiais)
+            novos = _sc.gravar_em_sheets(qualificados, sid)
+        except Exception as exc:
+            st.error(f"Não consegui gravar: {exc}")
+            return
+    cert = sum(1 for e in qualificados if int(e.get("score") or 0) >= 2)
+    poss = len(qualificados) - cert
+    st.success(
+        f"{origem}: **{len(editais)}** PE concreto/brita → **{len(qualificados)}** atendidas por filial "
+        f"no mesmo estado → **{len(novos)} novas** no boletim ({cert} CERTO · {poss} POSSÍVEL)."
+    )
+    if novos:
+        st.cache_data.clear()
+        st.info("Clique em **Boletim** de novo (ou recarregue) para vê-las na lista.")
+
+
+def _conlic_processar_colado(txt: str) -> None:
+    """Modo simples: processa o JSON colado pelo favorito."""
+    import json
+    if not (txt or "").strip():
+        st.error("Cole primeiro o JSON copiado pelo favorito **Limpar ConLicitação**.")
+        return
+    try:
+        data = json.loads(txt)
+    except Exception:
+        st.error("O texto colado não é um JSON válido. Copie de novo pelo favorito e cole inteiro.")
+        return
+    rows = data.get("licitacoes") if isinstance(data, dict) else data
+    if not isinstance(rows, list) or not rows:
+        st.error("Não encontrei a lista de licitações no JSON colado "
+                 "(esperado uma lista ou um objeto com a chave `licitacoes`).")
+        return
+    try:
+        import scraper as _sc
+    except Exception as exc:
+        st.error(f"Não consegui carregar o módulo de coleta: {exc}")
+        return
+    editais = [e for e in (_sc._normalizar_conlicitacao(r) for r in rows) if e]
+    editais = _sc._filtrar_pe_conlicitacao(editais)
+    if not editais:
+        st.warning(f"{len(rows)} licitações coladas, mas **nenhuma é Pregão Eletrônico de concreto "
+                   "usinado/brita** — nada a importar (o resto é asfalto, material geral, outra modalidade…).")
+        return
+    _conlic_qualificar_gravar(editais, f"{len(rows)} coladas")
+
+
+def _conlic_processar_inbox() -> None:
+    """Modo automático: processa a aba 'ConLic Inbox' (preenchida pelo favorito via Apps Script)."""
+    try:
+        import scraper as _sc
+    except Exception as exc:
+        st.error(f"Não consegui carregar o módulo de coleta: {exc}")
+        return
+    sid = _get_sheet_id()
+    with st.spinner("Lendo a aba ConLic Inbox e filtrando…"):
+        try:
+            editais = _sc._coletar_conlicitacao_inbox(sid)
+        except Exception as exc:
+            st.error(f"Não consegui ler a inbox: {exc}")
+            return
+    if not editais:
+        st.info("Nada novo na inbox (ou nenhum PE de concreto/brita). "
+                "Clique no favorito na tela do boletim e tente de novo.")
+        return
+    _conlic_qualificar_gravar(editais, "Inbox")
+
+
 def _secao_limpar_conlicitacao() -> None:
-    """Importação por 1 clique, sem token: o usuário faz login no ConLicitação, abre o boletim,
-    clica no favorito "Limpar ConLicitação" (que copia os editais como JSON) e cola aqui.
-    Mesmo pipeline do upload .xlsx — só PE de concreto/brita + geo + dedup."""
-    with st.expander("🧹 Limpar ConLicitação (1 clique, sem token)"):
-        st.caption("Faça **login** no ConLicitação, abra o **boletim** e clique no favorito "
-                   "**Limpar ConLicitação** — ele copia os editais. Cole abaixo e clique **Processar**. "
-                   "O Hub mantém só os **PE de concreto/brita**, aplica geografia e não duplica.")
+    """Traz editais do ConLicitação pro Hub. Dois modos: COLAR (zero setup) ou AUTOMÁTICO
+    (favorito → Apps Script → aba ConLic Inbox). Mesmo funil: só PE concreto/brita + geo + dedup.
+    Os dados só existem na aba logada do usuário, então o favorito roda lá e manda pro Hub."""
+    with st.expander("🧹 Limpar ConLicitação"):
+        st.caption("O ConLicitação descobre os editais; o Hub filtra só os **PE de concreto/brita**, "
+                   "aplica geografia (filial no mesmo estado) e não duplica. O favorito roda na **sua aba "
+                   "logada** (é lá que os dados existem) e manda pro Hub.")
         st.link_button("Abrir ConLicitação", "https://consulteonline.conlicitacao.com.br/",
-                       help="Abre o ConLicitação em outra aba. Faça login e abra o boletim antes de copiar.")
-        st.caption("**Instalar o favorito (só na 1ª vez):** crie um novo favorito no navegador e cole "
-                   "TODO o código abaixo no campo de **URL/endereço** do favorito (não na barra de busca).")
-        _bm = _carregar_bookmarklet()
-        if _bm:
-            st.code(_bm, language="javascript")
-        else:
-            st.caption("⚠️ Favorito indisponível — veja `web/conlic_bookmarklet.js`.")
-        txt = st.text_area("Cole aqui os editais copiados (JSON)", key="conlic_paste")
-        if st.button("Processar", type="primary", key="conlic_paste_btn"):
-            import json
-            if not (txt or "").strip():
-                st.error("Cole primeiro o JSON copiado pelo favorito **Limpar ConLicitação**.")
-                return
-            try:
-                data = json.loads(txt)
-            except Exception:
-                st.error("O texto colado não é um JSON válido. Copie de novo pelo favorito e cole inteiro.")
-                return
-            if isinstance(data, dict):
-                rows = data.get("licitacoes")
+                       help="Faça login e abra o boletim antes de clicar no favorito.")
+
+        tab_colar, tab_auto = st.tabs(["Colar (sem instalar nada extra)", "Automático (sem colar)"])
+
+        with tab_colar:
+            st.caption("**1ª vez:** crie um favorito no navegador e cole TODO o código abaixo no campo "
+                       "de **URL/endereço** dele (pelo gerenciador de favoritos).")
+            _bm = _carregar_bookmarklet()
+            if _bm:
+                st.code(_bm, language="javascript")
             else:
-                rows = data
-            if not isinstance(rows, list) or not rows:
-                st.error("Não encontrei a lista de licitações no JSON colado "
-                         "(esperado uma lista ou um objeto com a chave `licitacoes`).")
-                return
-            try:
-                import scraper as _sc
-            except Exception as exc:
-                st.error(f"Não consegui carregar o módulo de coleta: {exc}")
-                return
-            with st.spinner("Lendo os editais colados, filtrando e qualificando…"):
-                try:
-                    editais = [e for e in (_sc._normalizar_conlicitacao(r) for r in rows) if e]
-                    editais = _sc._filtrar_pe_conlicitacao(editais)
-                    if not editais:
-                        st.warning(f"{len(rows)} licitações coladas, mas **nenhuma é Pregão Eletrônico de "
-                                   "concreto usinado/brita** — nada a importar (o resto é asfalto, material "
-                                   "geral, outra modalidade, etc.).")
-                        return
-                    sid = _get_sheet_id()
-                    filiais = _sc.carregar_filiais(sid)
-                    qualificados = _sc.qualificar_por_distancia(editais, filiais)
-                    novos = _sc.gravar_em_sheets(qualificados, sid)
-                except Exception as exc:
-                    st.error(f"Não consegui processar os editais colados: {exc}")
-                    return
-            cert = sum(1 for e in qualificados if int(e.get("score") or 0) >= 2)
-            poss = len(qualificados) - cert
-            st.success(
-                f"Editais processados: **{len(rows)}** licitações → **{len(editais)}** PE concreto/brita → "
-                f"**{len(qualificados)}** atendidas por filial no mesmo estado → **{len(novos)} novas** no boletim "
-                f"({cert} CERTO · {poss} POSSÍVEL)."
+                st.caption("⚠️ Favorito indisponível — veja `web/conlic_bookmarklet.js`.")
+            st.caption("**No dia:** abra o boletim logado → clique no favorito (copia os editais) → "
+                       "cole aqui → Processar.")
+            txt = st.text_area("Cole aqui os editais copiados (JSON)", key="conlic_paste")
+            if st.button("Processar", type="primary", key="conlic_paste_btn"):
+                _conlic_processar_colado(txt)
+
+        with tab_auto:
+            st.caption("O favorito manda os editais **direto pro Hub** (sem colar). Precisa de uma "
+                       "configuração única do Apps Script — só você consegue, na sua conta Google.")
+            st.markdown(
+                "**Configurar (só 1 vez):**\n"
+                "1. Abra https://script.google.com → **Novo projeto**.\n"
+                "2. Cole o conteúdo de `web/conlic_apps_script.gs`; troque `TOKEN` (invente uma senha) e "
+                "`SHEET_ID` (o trecho da URL da planilha entre `/d/` e `/edit`).\n"
+                "3. **Implantar → Nova implantação → App da Web**; *Executar como* **você**, "
+                "*Acesso* **Qualquer pessoa**; copie a URL `/exec`.\n"
+                "4. Cole a URL e o **mesmo token** abaixo para gerar o seu favorito automático."
             )
-            if novos:
-                st.cache_data.clear()
-                st.info("Clique em **Boletim** de novo (ou recarregue) para vê-las na lista.")
+            _url = st.text_input("URL do Apps Script (/exec)", key="conlic_url")
+            _tok = st.text_input("Token (o mesmo do Apps Script)", key="conlic_tok", type="password")
+            if (_url or "").strip() and (_tok or "").strip():
+                _bmp = _bookmarklet_personalizado(_url, _tok)
+                if _bmp:
+                    st.caption("**Seu favorito automático** — crie um favorito e cole no campo de URL:")
+                    st.code(_bmp, language="javascript")
+            else:
+                st.caption("Preencha URL e token acima para gerar o favorito automático.")
+            st.divider()
+            st.caption("Instalado o favorito: no boletim logado, 1 clique manda pro Hub. O scraper puxa "
+                       "sozinho (7×/dia) — ou traga **agora**:")
+            if st.button("Processar inbox agora", key="conlic_inbox_btn"):
+                _conlic_processar_inbox()
 
 
 def _aba_editais(ed: pd.DataFrame) -> None:
