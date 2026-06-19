@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Michroma&family=Inter:wght@400;500;600;700&display=swap');
+  :root{
+    --primary:#3A4149; --header:#2E353D; --accent:#C28E2C; --accent-d:#A9781F;
+    --bg:#F7F8FA; --card:#FFFFFF; --text:#1F2937; --muted:#6B7280;
+    --border:#ECEEF1; --radius:13px;
+    --display:'Michroma','Calibri',sans-serif; --body:'Inter','Calibri',sans-serif;
+    --shadow1:0 1px 3px rgba(35,40,46,.07),0 1px 2px rgba(35,40,46,.04);
+    --shadow2:0 10px 28px rgba(35,40,46,.13),0 3px 8px rgba(35,40,46,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:14px}
+  h1,h2,h3,h4{font-family:var(--display);font-weight:400;color:var(--primary);letter-spacing:.01em;margin:0}
+  .wrap{max-width:1500px;margin:0 auto;padding:18px 22px 60px}
+  /* header */
+  .hbar{background:linear-gradient(135deg,#343B43 0%,#23282E 100%);border-bottom:3px solid var(--accent);
+    border-radius:var(--radius);padding:18px 24px;display:flex;justify-content:space-between;align-items:center;
+    box-shadow:var(--shadow1),0 14px 30px -18px rgba(194,142,44,.45)}
+  .hbar .t{color:#fff;font-family:var(--display);font-size:1.18rem;letter-spacing:.02em}
+  .hbar .s{color:#fff;opacity:.82;font-size:.84rem;margin-top:3px}
+  .sun{display:inline-block;width:.92em;height:.92em;vertical-align:-.08em;margin:0 .02em}
+  .updated{color:#fff;text-align:right;font-size:.78rem;opacity:.85}
+  /* cards */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}
+  .card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);
+    border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow1);transition:transform .2s,box-shadow .2s}
+  .card:hover{transform:translateY(-4px);box-shadow:var(--shadow2)}
+  .card .lbl{font-size:.7rem;text-transform:uppercase;color:var(--muted);letter-spacing:.09em;font-weight:600}
+  .card .val{font-size:1.5rem;font-family:var(--display);color:var(--accent-d);margin-top:6px}
+  /* paineis */
+  .grid{display:grid;gap:16px;margin-bottom:16px}
+  .g-2{grid-template-columns:1fr 1.6fr}
+  .g-2b{grid-template-columns:1.3fr 1fr}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow1)}
+  .panel h4{font-size:.9rem;margin-bottom:10px;color:var(--primary)}
+  .chart-box{position:relative;height:260px}
+  /* vencendo */
+  .alert{background:#FDF6E3;border:1px solid #E8D7A8;border-left:4px solid var(--accent);
+    border-radius:8px;padding:10px 14px;margin:6px 0;font-size:.9rem}
+  .alert b{color:var(--accent-d)}
+  /* abas */
+  .tabbar{display:flex;gap:6px;margin:10px 0 12px;flex-wrap:wrap}
+  .tabbtn{font-family:var(--display);font-size:.74rem;letter-spacing:.03em;padding:8px 16px;border-radius:10px;
+    border:1px solid var(--primary);background:var(--primary);color:#fff;cursor:pointer;transition:.15s}
+  .tabbtn:hover{background:#2E353D}
+  .tabbtn.on{background:linear-gradient(135deg,#C28E2C,#A9781F);border-color:#C28E2C;box-shadow:0 4px 16px rgba(194,142,44,.32)}
+  .search{width:100%;max-width:420px;padding:9px 12px;border:1px solid #CDD2D8;border-radius:10px;font-family:var(--body);font-size:.9rem;margin-bottom:10px}
+  .search:focus{outline:none;border-color:var(--accent)}
+  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px;max-height:62vh}
+  table{border-collapse:collapse;width:100%;font-size:.82rem;white-space:nowrap}
+  thead th{position:sticky;top:0;background:var(--primary);color:#E7D9B6;text-align:left;
+    padding:9px 11px;border-bottom:2px solid var(--accent);font-weight:600;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}
+  tbody td{padding:8px 11px;border-bottom:1px solid #F0F1F3;color:#374151}
+  tbody tr:nth-child(even){background:#FAFBFC}
+  tbody tr:hover{background:#FBF3E3}
+  .count{color:#6B7280;font-size:.82rem;margin:4px 0 8px}
+  /* loading */
+  #load{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50}
+  .spin{width:46px;height:46px;border:4px solid #E7D9B6;border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  #load p{margin-top:14px;color:var(--muted);font-family:var(--display);font-size:.8rem;letter-spacing:.05em}
+  .err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px 18px;border-radius:10px;margin:20px 0}
+  @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.g-2,.g-2b{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div id="load"><div class="spin"></div><p>Carregando histórico…</p></div>
+
+  <div class="wrap" id="app" style="display:none">
+    <div class="hbar">
+      <div>
+        <div class="t">CONCRELAG<svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.7" fill="none" stroke="#C28E2C" stroke-width="2.6"/><g stroke="#C28E2C" stroke-width="2.3" stroke-linecap="round"><line x1="12" y1="1.6" x2="12" y2="5.2"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(30 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(60 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(90 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(120 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(150 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(180 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(210 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(240 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(270 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(300 12 12)"/><line x1="12" y1="1.6" x2="12" y2="5.2" transform="rotate(330 12 12)"/></g></svg>S <span style="opacity:.85;font-size:.8em">HISTÓRICO COMERCIAL</span></div>
+        <div class="s">Pregões, contratos e aditivos — espelho da planilha comercial</div>
+      </div>
+      <div class="updated">Atualizado da planilha<br><span id="upd">—</span></div>
+    </div>
+
+    <div id="erro"></div>
+    <div class="cards" id="kpis"></div>
+
+    <div class="grid g-2">
+      <div class="panel"><h4>Resultado geral</h4><div class="chart-box"><canvas id="cDonut"></canvas></div></div>
+      <div class="panel"><h4>Disputados × vitórias por ano</h4><div class="chart-box"><canvas id="cAno"></canvas></div></div>
+    </div>
+    <div class="grid g-2b">
+      <div class="panel"><h4>Volume contratado (m³) por ano — por empresa</h4><div class="chart-box"><canvas id="cVol"></canvas></div></div>
+      <div class="panel"><h4>Top clientes por volume (m³)</h4><div class="chart-box"><canvas id="cCli"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="panel"><h4>Valor contratado (R$) por ano — por empresa</h4><div class="chart-box" style="height:300px"><canvas id="cVal"></canvas></div></div>
+    </div>
+
+    <div class="panel" id="vencBox" style="display:none;margin-bottom:16px">
+      <h4>Contratos a vencer (próximos 90 dias)</h4>
+      <div id="venc"></div>
+    </div>
+
+    <div class="panel">
+      <div class="tabbar" id="tabbar"></div>
+      <input class="search" id="search" placeholder="Buscar: cliente, nº do pregão, objeto…">
+      <div class="count" id="count"></div>
+      <div class="tbl-wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  var DADOS=null, abaAtual=0, charts={};
+  function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function milPT(n){return Math.round(n).toLocaleString('pt-BR');}
+
+  if(typeof google==='undefined' || !google.script || !google.script.run){
+    // Pré-visualização fora do Apps Script: mostra o layout, sem dados reais.
+    document.getElementById('load').style.display='none';
+    document.getElementById('app').style.display='block';
+    document.getElementById('erro').innerHTML='<div class="err">Pré-visualização: os dados só carregam quando este arquivo roda publicado no Google Apps Script (é lá que ele lê a planilha). Aqui você vê só o layout.</div>';
+  } else {
+    google.script.run
+      .withSuccessHandler(onDados)
+      .withFailureHandler(function(err){
+        document.getElementById('load').style.display='none';
+        document.getElementById('app').style.display='block';
+        document.getElementById('erro').innerHTML='<div class="err">Não consegui ler a planilha: '+esc(err&&err.message)+'</div>';
+      })
+      .getDados();
+  }
+
+  function onDados(d){
+    DADOS=d;
+    document.getElementById('load').style.display='none';
+    document.getElementById('app').style.display='block';
+    if(!d||!d.ok){document.getElementById('erro').innerHTML='<div class="err">Sem dados.</div>';return;}
+    document.getElementById('upd').textContent=new Date().toLocaleString('pt-BR');
+    renderKpis(); renderCharts(); renderVenc(); renderTabbar(); renderTabela();
+  }
+
+  function renderKpis(){
+    var k=DADOS.kpis; if(!k){return;}
+    var html=[
+      ['Pregões registrados', milPT(k.pregoes)],
+      ['Vitórias ('+k.taxa.toFixed(0)+'% de vitória)', milPT(k.vitorias)],
+      ['Derrotas', milPT(k.derrotas)],
+      ['Volume contratado (m³)', milPT(k.volume)]
+    ].map(function(c){return '<div class="card"><div class="lbl">'+esc(c[0])+'</div><div class="val">'+c[1]+'</div></div>';}).join('');
+    document.getElementById('kpis').innerHTML=html;
+  }
+
+  function destroy(id){ if(charts[id]){charts[id].destroy();} }
+  function renderCharts(){
+    var k=DADOS.kpis||{pregoes:0,vitorias:0,derrotas:0};
+    var outros=Math.max(k.pregoes-k.vitorias-k.derrotas,0);
+    destroy('cDonut');
+    charts.cDonut=new Chart(document.getElementById('cDonut'),{type:'doughnut',
+      data:{labels:['Vitória','Derrota','Outros'],datasets:[{data:[k.vitorias,k.derrotas,outros],
+        backgroundColor:['#C28E2C','#3A4149','#D4D8DD'],borderWidth:2,borderColor:'#fff'}]},
+      options:{cutout:'62%',plugins:{legend:{position:'bottom'}},maintainAspectRatio:false}});
+
+    var pa=DADOS.porAno||[];
+    destroy('cAno');
+    charts.cAno=new Chart(document.getElementById('cAno'),{type:'bar',
+      data:{labels:pa.map(function(x){return x.ano;}),datasets:[
+        {label:'Disputados',data:pa.map(function(x){return x.disputados;}),backgroundColor:'#3A4149',borderRadius:4},
+        {label:'Vitórias',data:pa.map(function(x){return x.vitorias;}),backgroundColor:'#C28E2C',borderRadius:4}]},
+      options:{plugins:{legend:{position:'bottom'}},maintainAspectRatio:false,scales:{y:{beginAtZero:true}}}});
+
+    stackChart('cVol', DADOS.volAnoEmp, false);
+    stackChart('cVal', DADOS.valAnoEmp, true);
+
+    var tc=DADOS.topClientes||[];
+    destroy('cCli');
+    charts.cCli=new Chart(document.getElementById('cCli'),{type:'bar',
+      data:{labels:tc.map(function(x){return x.cliente;}),datasets:[{label:'m³',data:tc.map(function(x){return x.vol;}),backgroundColor:'#C28E2C',borderRadius:4}]},
+      options:{indexAxis:'y',plugins:{legend:{display:false}},maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});
+  }
+
+  function stackChart(id, src, isMoney){
+    if(!src){return;}
+    destroy(id);
+    var ds=src.datasets.filter(function(d){return d.data.some(function(v){return v>0;});}).map(function(d){
+      return {label:d.empresa,data:d.data,backgroundColor:d.cor,borderRadius:3};
+    });
+    charts[id]=new Chart(document.getElementById(id),{type:'bar',
+      data:{labels:src.anos,datasets:ds},
+      options:{plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:function(c){
+        var v=c.parsed.y; return c.dataset.label+': '+(isMoney?('R$ '+milPT(v)):milPT(v));}}}},
+        maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,
+          ticks:{callback:function(v){return (isMoney?'R$ ':'')+(v>=1e6?(v/1e6).toFixed(1).replace('.',',')+' mi':v>=1e3?Math.round(v/1e3)+' mil':v);}}}}}});
+  }
+
+  function renderVenc(){
+    var v=DADOS.vencendo||[]; if(!v.length){return;}
+    document.getElementById('vencBox').style.display='block';
+    document.getElementById('venc').innerHTML=v.map(function(x){
+      return '<div class="alert"><b>'+esc(x.cliente)+'</b> — pregão '+esc(x.pregao)+' · vence em <b>'+x.dias+' dia(s)</b> ('+esc(x.validade)+'). Avaliar aditivo/renovação.</div>';
+    }).join('');
+  }
+
+  function renderTabbar(){
+    document.getElementById('tabbar').innerHTML=(DADOS.abas||[]).map(function(a,i){
+      return '<button class="tabbtn'+(i===abaAtual?' on':'')+'" onclick="setAba('+i+')">'+esc(a.titulo)+'</button>';
+    }).join('');
+  }
+  function setAba(i){abaAtual=i;document.getElementById('search').value='';renderTabbar();renderTabela();}
+
+  function renderTabela(){
+    var a=DADOS.abas[abaAtual]; if(!a){return;}
+    var q=(document.getElementById('search').value||'').toLowerCase();
+    var rows=a.rows.slice().reverse(); // mais recentes primeiro
+    if(q){rows=rows.filter(function(r){return r.some(function(c){return String(c).toLowerCase().indexOf(q)>=0;});});}
+    document.getElementById('thead').innerHTML='<tr>'+a.header.map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr>';
+    var body=rows.map(function(r){
+      var tds=''; for(var i=0;i<a.header.length;i++){tds+='<td>'+esc(r[i]!==undefined?r[i]:'')+'</td>';}
+      return '<tr>'+tds+'</tr>';
+    }).join('');
+    document.getElementById('tbody').innerHTML=body||'<tr><td style="padding:14px;color:#9CA3AF">Nenhum registro.</td></tr>';
+    document.getElementById('count').textContent=rows.length+' registro(s) — mais recentes primeiro.';
+  }
+
+  document.getElementById('search').addEventListener('input',renderTabela);
+</script>
+</body>
+</html>
