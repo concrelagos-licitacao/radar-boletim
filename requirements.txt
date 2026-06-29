@@ -1,0 +1,4 @@
+requests==2.34.2
+gspread==6.2.1
+geopy==2.4.1
+python-dotenv==1.2.2

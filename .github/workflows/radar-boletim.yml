@@ -1,0 +1,38 @@
+name: Boletim Licitacoes
+
+on:
+  schedule:
+    - cron: '0 10 * * *'   # 07:00 BRT (UTC-3) todos os dias
+  workflow_dispatch:         # botao "Run workflow" manual no GitHub
+
+jobs:
+  boletim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Gravar credenciais Google
+        run: |
+          mkdir -p credenciais
+          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credenciais/service_account.json
+
+      - name: Rodar radar.py
+        env:
+          GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          HAVERSINE_AJUSTE_FATOR: '1.0'
+        run: python radar.py
+
+      - name: Limpar credenciais
+        if: always()
+        run: rm -f credenciais/service_account.json
