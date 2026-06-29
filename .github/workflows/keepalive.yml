@@ -1,0 +1,18 @@
+name: Keepalive
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'  # dia 1 de cada mes — evita desativacao do cron apos 60 dias sem push
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keepalive
+        run: echo "ping $(date -u)" >> .github/keepalive.log
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: keepalive mensal [skip ci]"
+          file_pattern: .github/keepalive.log
