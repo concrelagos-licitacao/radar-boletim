@@ -7,8 +7,9 @@ from datetime import date
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 
-EMAIL_TO   = os.environ.get('EMAIL_TO', 'licitacao.concrelagos@gmail.com')
-EMAIL_FROM = os.environ.get('EMAIL_FROM', 'licitacao.concrelagos@gmail.com')
+# 'or' (nao .get default) porque o workflow passa o secret VAZIO quando ele nao existe
+EMAIL_TO   = os.environ.get('EMAIL_TO')   or 'licitacao.concrelagos@gmail.com'
+EMAIL_FROM = os.environ.get('EMAIL_FROM') or 'licitacao.concrelagos@gmail.com'
 EMAIL_PASS = os.environ.get('GMAIL_APP_PASSWORD', '')
 EMAIL_CC   = os.environ.get('EMAIL_CC', '')
 
@@ -140,7 +141,8 @@ def gerar_html(rows, hoje):
 def main():
     creds_path = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
     gc = gspread.service_account(filename=creds_path)
-    rows = gc.open_by_key(SHEET_ID).worksheet('Boletim Licitacoes').get_all_records()
+    # head=2: a linha 1 da aba e o banner; o cabecalho real esta na linha 2
+    rows = gc.open_by_key(SHEET_ID).worksheet('Boletim Licitacoes').get_all_records(head=2)
 
     if not rows:
         print('Boletim vazio — e-mail nao enviado.')

@@ -152,16 +152,17 @@ ini = hoje - datetime.timedelta(days=14)
 registros = []      # cada um: dict fonte/uf/municipio/orgao/objeto/data_sessao/data_pub/numero/link/uid
 PNCP_TRUNC = []     # UFs em que o PNCP truncou (integra=False) -> vira ALERTA
 
-# orcamento de tempo: as coletas param e entregam o que houver antes de estourar o job
-_COLETA_T0 = time.monotonic()
-_COLETA_BUDGET = float(os.environ.get('COLETA_BUDGET_S', '780'))   # ~13 min teto p/ as 3 coletas
-def _tempo_ok():
-    return (time.monotonic() - _COLETA_T0) < _COLETA_BUDGET
+# orcamento de tempo POR FONTE: nenhuma fonte (ex: PNCP fora do ar) monopoliza o tempo das outras
+PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '300'))     # 5 min
+LICITAR_BUDGET_S = float(os.environ.get('LICITAR_BUDGET_S', '300'))  # 5 min
+def _prazo(segundos):
+    fim = time.monotonic() + segundos
+    return lambda: time.monotonic() < fim
 
 # ---------- 1) PNCP ----------
 def pncp_get(url):
     for i in range(3):
-        try: r = requests.get(url, timeout=50, headers=UA)
+        try: r = requests.get(url, timeout=20, headers=UA)
         except Exception: time.sleep(1.5*(i+1)); continue
         if r.status_code == 204: return {'data': [], 'totalPaginas': 0}
         if r.status_code != 200: time.sleep(1.5*(i+1)); continue
@@ -173,11 +174,12 @@ def pncp_get(url):
     return None
 def coleta_pncp():
     n = 0
+    ok_tempo = _prazo(PNCP_BUDGET_S)
     for uf in UFS:
-        if not _tempo_ok(): break
+        if not ok_tempo(): print("  PNCP: orcamento de tempo esgotado"); break
         pag, tot, ok = 1, 1, True
         while pag <= tot and pag <= 80:
-            if not _tempo_ok(): break
+            if not ok_tempo(): break
             url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
                    '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
                    % (ini.strftime('%Y%m%d'), hoje.strftime('%Y%m%d'), uf, pag))
@@ -231,14 +233,15 @@ def coleta_qd():
 # ---------- 3) Licitar Digital ----------
 def coleta_licitar():
     n = 0
+    ok_tempo = _prazo(LICITAR_BUDGET_S)
     H = {**UA, 'Content-Type': 'application/json', 'Accept': 'application/json'}
     URL = 'https://manager-api.licitardigital.com.br/auction-notice/doSearchAuctionNotice'
     for uf in UFS:
-        if not _tempo_ok(): break
+        if not ok_tempo(): print("  Licitar: orcamento de tempo esgotado"); break
         for termo in ('concreto', 'brita'):
             offset, vazias = 0, 0
             while offset <= 600:
-                if not _tempo_ok(): break
+                if not ok_tempo(): break
                 body = {'filter': {'search': termo, 'auctionType': 'E', 'state': uf}, 'offset': offset}
                 try:
                     r = requests.post(URL, headers=H, data=json.dumps(body), timeout=40)
