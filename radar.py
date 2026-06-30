@@ -195,6 +195,8 @@ def coleta_pncp():
                                   'data_sessao': iso(d.get('dataEncerramentoProposta') or d.get('dataAberturaProposta')),
                                   'data_pub': iso(d.get('dataPublicacaoPncp')), 'numero': d.get('numeroControlePNCP', ''),
                                   'link': 'https://pncp.gov.br/app/editais',
+                                  'valor': d.get('valorTotalEstimado') or '',
+                                  'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
                                   'uid': 'PNCP:' + str(d.get('numeroControlePNCP') or '')}); n += 1
             if not data and pag < tot:
                 time.sleep(4); data = (pncp_get(url) or {}).get('data') or []
@@ -343,17 +345,17 @@ if filiais:
 # ---------- grava o BOLETIM (mesma estrutura do ConLic) ----------
 final.sort(key=lambda r: (r.get('data_sessao') or '9999', r['uf']))
 FONTE_LBL = {'PNCP': 'PNCP', 'LICITAR_DIGITAL': 'Licitar Digital', 'QUERIDO_DIARIO': 'Diario Oficial'}
-header = ['DATA SESSAO', 'UF', 'MUNICIPIO', 'ORGAO', 'OBJETO', 'FONTE', 'PUBLICADO', 'NUMERO', 'DISTANCIA KM', 'FILIAL PROXIMA', 'TIPO', 'LINK']
+header = ['DATA SESSAO', 'UF', 'MUNICIPIO', 'ORGAO', 'OBJETO', 'FONTE', 'PUBLICADO', 'NUMERO', 'DISTANCIA KM', 'FILIAL PROXIMA', 'TIPO', 'LINK', 'VALOR', 'MODALIDADE']
 linhas = [[r.get('data_sessao',''), r['uf'], r.get('municipio',''), r['orgao'], r['objeto'],
            FONTE_LBL.get(r['fonte'], r['fonte']), r.get('data_pub',''), str(r.get('numero','')),
            str(r.get('distancia_km','')), r.get('filial_proxima',''), r.get('tipo_atendimento',''),
-           r.get('link','')]
+           r.get('link',''), str(r.get('valor','')), r.get('modalidade','')]
           for r in final]
 banner = "BOLETIM %s | %d editais | PNCP %d  Licitar %d  Diario %d | %s" % (
     AGORA, len(final), porfonte.get('PNCP',0), porfonte.get('LICITAR_DIGITAL',0), porfonte.get('QUERIDO_DIARIO',0),
     ("*** ALERTA: " + alerta_txt + " ***") if alertas else alerta_txt)
 
-ws = aba('Boletim Licitacoes', 12)
+ws = aba('Boletim Licitacoes', 14)
 ws.clear()
 ws.update(values=[[banner], header] + linhas, range_name='A1')
 print("\nOK -> aba 'Boletim Licitacoes' (%d editais) | %s" % (len(final), alerta_txt))

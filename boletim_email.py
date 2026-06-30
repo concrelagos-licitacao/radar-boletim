@@ -73,7 +73,7 @@ def gerar_html(rows, hoje):
           <td style="padding:8px 10px;text-align:center">{btn}</td>
         </tr>'''
 
-    planilha_url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}'
+    site_url = os.environ.get('SITE_URL', 'https://concrelagos-licitacao.github.io/radar-boletim')
 
     return f'''<!DOCTYPE html>
 <html>
@@ -122,8 +122,8 @@ def gerar_html(rows, hoje):
     <!-- RODAPE -->
     <tr>
       <td style="background:#ECEFF1;border-radius:0 0 10px 10px;padding:14px 28px;text-align:center">
-        <a href="{planilha_url}" style="background:#0D47A1;color:#fff;padding:8px 20px;border-radius:8px;font-size:13px;text-decoration:none">
-          Abrir planilha completa
+        <a href="{site_url}" style="background:#0D47A1;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:bold;text-decoration:none">
+          Abrir o Radar completo (filtros, gráficos e histórico)
         </a>
         <div style="color:#90A4AE;font-size:11px;margin-top:10px">
           Boletim automático — Equipe Jurídica Concrelagos · licitacao@concrelagos.com.br
