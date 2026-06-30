@@ -55,6 +55,8 @@ def iso(s):
 HAVERSINE_AJUSTE = float(os.environ.get('HAVERSINE_AJUSTE_FATOR', '1.0'))
 _GEO_CACHE = {}
 _geocoder_inst = [None]
+_GEO_OFF = [False]      # disjuntor: desliga geocoding se Nominatim cair
+_GEO_FALHAS = [0]       # falhas/timeouts consecutivos
 
 def _haversine_km(p1, p2):
     lat1, lng1 = map(radians, p1)
@@ -67,18 +69,25 @@ def _geocode(municipio, uf):
     key = (_n(municipio), uf.upper())
     if key in _GEO_CACHE:
         return _GEO_CACHE[key]
+    if _GEO_OFF[0]:        # disjuntor aberto: nao bate mais no Nominatim
+        return None
     try:
         from geopy.geocoders import Nominatim
         if _geocoder_inst[0] is None:
-            _geocoder_inst[0] = Nominatim(user_agent='concrelagos-boletim/1.0')
+            _geocoder_inst[0] = Nominatim(user_agent='concrelagos-boletim/1.0', timeout=10)
         time.sleep(1.1)
-        loc = _geocoder_inst[0].geocode('%s, %s, Brasil' % (municipio, uf), country_codes=['br'])
+        loc = _geocoder_inst[0].geocode('%s, %s, Brasil' % (municipio, uf), country_codes=['br'], timeout=10)
+        _GEO_FALHAS[0] = 0
         if loc:
             coord = (float(loc.latitude), float(loc.longitude))
             _GEO_CACHE[key] = coord
             return coord
     except Exception as e:
+        _GEO_FALHAS[0] += 1
         print("  GEO erro %s/%s: %s" % (municipio, uf, repr(e)[:60]))
+        if _GEO_FALHAS[0] >= 5:
+            _GEO_OFF[0] = True
+            print("  GEO DESATIVADO: 5 falhas seguidas (Nominatim fora). Boletim segue sem distancia.")
     _GEO_CACHE[key] = None
     return None
 
