@@ -15,11 +15,13 @@ import os
 import re
 import csv
 import json
+import time
 import shutil
 import unicodedata
 from datetime import datetime, timezone, timedelta
 
 import gspread
+import requests
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 ABA = 'Boletim Licitacoes'
@@ -126,6 +128,95 @@ def merge_historico(novos, hoje):
         return '0000-00-00'
     todos.sort(key=lambda r: (_ord(r), r.get('capturado_em', '')), reverse=True)
     return todos, add
+
+
+# ---------- Gemini BLINDADO (opcional): so reescreve numeros, nunca le edital ----------
+# Falha graciosa total: sem GEMINI_API_KEY -> nao mexe em nada (site usa veredito client-side).
+GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+GEMINI_URL = ('https://generativelanguage.googleapis.com/v1beta/models/'
+              'gemini-2.0-flash:generateContent')
+_GEM = {'off': not GEMINI_KEY, 'falhas': 0, 't0': None,
+        'budget': float(os.environ.get('GEMINI_BUDGET_S', '120'))}
+
+
+def _num(r, k):
+    v = (r.get(k) or '').replace('.', '').replace(',', '.')
+    try:
+        n = float(v)
+        return n if n > 0 else None
+    except Exception:
+        return None
+
+
+def _dias_ate(r):
+    d = (r.get('DATA SESSAO') or '').split('/')
+    if len(d) != 3:
+        return None
+    try:
+        alvo = datetime(int(d[2]), int(d[1]), int(d[0]))
+        hoje = datetime.now(timezone(timedelta(hours=-3))).replace(tzinfo=None)
+        return (alvo - hoje).days
+    except Exception:
+        return None
+
+
+def _gemini_frase(r):
+    """1 frase factual a partir SO dos campos ja calculados. '' em qualquer falha."""
+    if _GEM['off']:
+        return ''
+    if _GEM['t0'] is None:
+        _GEM['t0'] = time.monotonic()
+    if time.monotonic() - _GEM['t0'] > _GEM['budget'] or _GEM['falhas'] >= 5:
+        _GEM['off'] = True
+        return ''
+    km = _num(r, 'DISTANCIA KM')
+    val = _num(r, 'VALOR')
+    dias = _dias_ate(r)
+    campos = ('objeto=%s; uf=%s; municipio=%s; distancia_km=%s; valor_reais=%s; dias_ate_sessao=%s'
+              % ((r.get('OBJETO') or '')[:160], r.get('UF', ''), r.get('MUNICIPIO', ''),
+                 ('%.0f' % km) if km is not None else 'n/d',
+                 ('%.0f' % val) if val is not None else 'n/d',
+                 dias if dias is not None else 'n/d'))
+    prompt = ('Voce escreve UMA frase curta (maximo 18 palavras), em portugues, factual, para um '
+              'diretor decidir sobre uma licitacao de concreto/brita. Use SOMENTE os dados abaixo. '
+              'NAO invente nada, NAO de opiniao juridica, NAO cite exigencias. Se faltar dado '
+              'essencial, responda exatamente VAZIO.\nDados: ' + campos + '\nFrase:')
+    try:
+        resp = requests.post(
+            GEMINI_URL, params={'key': GEMINI_KEY},
+            json={'contents': [{'parts': [{'text': prompt}]}],
+                  'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 60}},
+            timeout=15)
+        if resp.status_code != 200:
+            _GEM['falhas'] += 1
+            return ''
+        cand = (resp.json().get('candidates') or [{}])[0]
+        txt = (((cand.get('content') or {}).get('parts') or [{}])[0].get('text') or '').strip()
+        _GEM['falhas'] = 0
+        txt = re.sub(r'\s+', ' ', txt).strip().strip('"')
+        if not txt or txt.upper() == 'VAZIO' or len(txt) > 200:
+            return ''
+        return txt
+    except Exception:
+        _GEM['falhas'] += 1
+        return ''
+
+
+def enriquecer_veredito(todos):
+    """So roda se GEMINI_API_KEY existir. Cache: pula edital que ja tem VEREDITO."""
+    if _GEM['off']:
+        return 0
+    n = 0
+    for r in todos:
+        if (r.get('VEREDITO') or '').strip():
+            continue
+        if _GEM['off']:
+            break
+        frase = _gemini_frase(r)
+        if frase:
+            r['VEREDITO'] = frase
+            n += 1
+    return n
 
 
 def gerar_html(total, novos_hoje, hoje):
@@ -249,6 +340,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* chips/badges */
   .star{font-size:1.05rem;color:#D1D5DB;cursor:pointer;line-height:1;transition:transform .12s}.star:hover{transform:scale(1.2)}.star.on{color:var(--accent)}
   .star.w{color:#E7D9B6}.star.w.on{color:#fff}
+  .acts{white-space:nowrap}
+  .act{font-size:.9rem;cursor:pointer;margin-left:6px;color:#C7CBD1;transition:transform .12s,color .12s;font-weight:700}
+  .act:hover{transform:scale(1.25)}.alido.on{color:var(--ok)}.adesc:hover{color:var(--urg)}
+  .ehead .star,.ehead .act{color:#9aa1ab;margin-left:6px}.ehead .star.on{color:#fff}.ehead .alido.on{color:#7CFC9E}
+  .selo{background:#DCFCE7;color:#15803D;border-radius:6px;padding:1px 6px;font-size:.58rem;font-weight:700;margin-left:5px;font-family:var(--disp)}
+  .lidorow td{opacity:.55}.ecard.lido{opacity:.62}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -326,6 +423,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="fcol"><label>Exibir</label><div class="seg"><button id="mTab" class="on">▤ Tabela</button><button id="mCard">▦ Cards</button></div></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn g" id="bprox">Melhores oportunidades</button></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="bfav">★ So acompanhados</button></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bocultar">Ocultar lidos</button></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bdesc">Ver descartados</button></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="bcsv">Exportar CSV</button></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="blimpar">Limpar</button></div>
         </div>
@@ -369,8 +468,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-var DADOS=[],VIS=[],HOJE="{{HOJE}}",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,modo="tab";
-var FAV={};try{FAV=JSON.parse(localStorage.getItem('cl_fav')||'{}');}catch(e){FAV={};}
+var DADOS=[],VIS=[],HOJE="{{HOJE}}",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab";
+function _ls(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
+var FAV=_ls('cl_fav'),LIDO=_ls('cl_lido'),DESC=_ls('cl_descartado');
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
 function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
@@ -381,7 +481,12 @@ function fmtBRL(n){if(n==null)return '-';if(n>=1e6)return 'R$ '+(n/1e6).toLocale
 function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
 function favKey(r){return g(r,'NUMERO')||g(r,'LINK')||(g(r,'DATA SESSAO')+'|'+g(r,'ORGAO')+'|'+g(r,'OBJETO').slice(0,40));}
 function isFav(r){return !!FAV[favKey(r)];}
-function toggleFav(r){var k=favKey(r);if(FAV[k])delete FAV[k];else FAV[k]=1;try{localStorage.setItem('cl_fav',JSON.stringify(FAV));}catch(e){}}
+function isLido(r){return !!LIDO[favKey(r)];}
+function isDesc(r){return !!DESC[favKey(r)];}
+function _sav(k,o){try{localStorage.setItem(k,JSON.stringify(o));}catch(e){}}
+function toggleFav(r){var k=favKey(r);if(FAV[k])delete FAV[k];else FAV[k]=1;_sav('cl_fav',FAV);}
+function toggleLido(r){var k=favKey(r);if(LIDO[k])delete LIDO[k];else LIDO[k]=1;_sav('cl_lido',LIDO);}
+function toggleDesc(r){var k=favKey(r);if(DESC[k])delete DESC[k];else DESC[k]=1;_sav('cl_descartado',DESC);}
 var $=function(i){return document.getElementById(i);};
 
 function score(r){
@@ -421,6 +526,9 @@ function aplicar(){
   $('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
   var hoje=new Date();hoje.setHours(0,0,0,0);
   VIS=DADOS.filter(function(r){
+    if(isDesc(r)&&!verDesc)return false;          // descartado some (toggle 've descartados')
+    if(verDesc&&!isDesc(r))return false;          // modo 've descartados' mostra so os descartados
+    if(ocultarLidos&&isLido(r))return false;
     if(soFav&&!isFav(r))return false;
     if(uf&&g(r,'UF')!==uf)return false;
     if(fo&&g(r,'FONTE')!==fo)return false;
@@ -497,10 +605,10 @@ function renderTabela(){
     var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>');
     var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir</a>':'-';
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
-    h+='<tr class="lin" data-i="'+gi+'">'
-      +'<td><span class="star '+(isFav(r)?'on':'')+'" data-f="'+gi+'">'+(isFav(r)?'★':'☆')+'</span></td>'
+    h+='<tr class="lin'+(isLido(r)?' lidorow':'')+'" data-i="'+gi+'">'
+      +'<td class="acts">'+actHTML(gi,r)+'</td>'
       +'<td><span class="sc2" style="background:'+scCor(s)+'">'+s+'</span></td>'
-      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+'</td>'
+      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+(isLido(r)?'<span class="selo">LIDO</span>':'')+'</td>'
       +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
       +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
@@ -509,7 +617,7 @@ function renderTabela(){
   });
   tb.innerHTML=h;
   document.querySelectorAll('#tbody tr.lin').forEach(function(tr){tr.addEventListener('click',function(){var i=tr.getAttribute('data-i');abertos[i]=!abertos[i];render();});});
-  bindStars('#tbody');
+  bindActions('#tbody');
 }
 
 function renderCards(){
@@ -519,9 +627,10 @@ function renderCards(){
   page.forEach(function(r,idx){
     var gi=ini+idx,s=score(r),km=kmNum(r),d=diasAte(r),v=valNum(r);
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
-    h+='<div class="ecard"><div class="ehead">'
+    h+='<div class="ecard'+(isLido(r)?' lido':'')+'"><div class="ehead">'
       +'<span class="enum">#'+('0'+(gi+1)).slice(-2)+'</span>'
-      +'<span class="ebadges"><span class="star w '+(isFav(r)?'on':'')+'" data-f="'+gi+'">'+(isFav(r)?'★':'☆')+'</span>'
+      +'<span class="ebadges">'+actHTML(gi,r)
+      +(isLido(r)?'<span class="selo">LIDO</span>':'')
       +(urgT(r)?urgT(r):'')+'<span class="pri '+priCls(s)+'">'+priTxt(s)+'</span><span class="sc2" style="background:'+scCor(s)+'">SCORE '+s+'</span></span></div>'
       +'<div class="ebody">'
       +'<div class="eobj">'+esc(g(r,'OBJETO')).slice(0,200)+nv+'</div>'
@@ -544,11 +653,18 @@ function renderCards(){
       +'</div></div>';
   });
   box.innerHTML=h;
-  bindStars('#ecards');
+  bindActions('#ecards');
 }
 
-function bindStars(sel){
-  document.querySelectorAll(sel+' .star').forEach(function(st){st.addEventListener('click',function(ev){ev.stopPropagation();var i=+st.getAttribute('data-f');toggleFav(VIS[i]);kpis();if(soFav)aplicar();else render();});});
+function actHTML(gi,r){
+  return '<span class="star '+(isFav(r)?'on':'')+'" data-f="'+gi+'" title="Favoritar (acompanhar)">'+(isFav(r)?'★':'☆')+'</span>'
+    +'<span class="act alido '+(isLido(r)?'on':'')+'" data-l="'+gi+'" title="Marcar como lido">✓</span>'
+    +'<span class="act adesc" data-x="'+gi+'" title="Descartar (some da lista)">✗</span>';
+}
+function bindActions(sel){
+  document.querySelectorAll(sel+' .star').forEach(function(st){st.addEventListener('click',function(ev){ev.stopPropagation();toggleFav(VIS[+st.getAttribute('data-f')]);kpis();if(soFav)aplicar();else render();});});
+  document.querySelectorAll(sel+' .alido').forEach(function(st){st.addEventListener('click',function(ev){ev.stopPropagation();toggleLido(VIS[+st.getAttribute('data-l')]);kpis();if(ocultarLidos)aplicar();else render();});});
+  document.querySelectorAll(sel+' .adesc').forEach(function(st){st.addEventListener('click',function(ev){ev.stopPropagation();toggleDesc(VIS[+st.getAttribute('data-x')]);aplicar();});});
 }
 
 function paginacao(){
@@ -608,8 +724,10 @@ $('mTab').addEventListener('click',function(){modo='tab';$('mTab').classList.add
 $('mCard').addEventListener('click',function(){modo='card';$('mCard').classList.add('on');$('mTab').classList.remove('on');pg=0;render();});
 $('bprox').addEventListener('click',function(){ordCol='score';ordDir=-1;pg=0;ordenar();render();document.querySelector('.tabbtn[data-t=editais]').click();});
 $('bfav').addEventListener('click',function(){soFav=!soFav;$('bfav').classList.toggle('on',soFav);aplicar();});
+$('bocultar').addEventListener('click',function(){ocultarLidos=!ocultarLidos;$('bocultar').classList.toggle('on',ocultarLidos);$('bocultar').textContent=ocultarLidos?'Mostrar lidos':'Ocultar lidos';aplicar();});
+$('bdesc').addEventListener('click',function(){verDesc=!verDesc;$('bdesc').classList.toggle('on',verDesc);$('bdesc').textContent=verDesc?'Voltar aos ativos':'Ver descartados';aplicar();});
 $('bcsv').addEventListener('click',exportarCSV);
-$('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;$('bfav').classList.remove('on');ordCol='data';ordDir=-1;aplicar();});
+$('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;$('bfav').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='data';ordDir=-1;aplicar();});
 
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
   DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();aplicar();
@@ -631,6 +749,14 @@ def main():
     print('Lidos %d editais da aba %s' % (len(novos), ABA))
 
     todos, add = merge_historico(novos, hoje)
+
+    # Gemini (opcional, blindado): so reescreve o veredito se a key existir; falha graciosa
+    if not _GEM['off']:
+        ger = enriquecer_veredito(todos)
+        print('Gemini: %d vereditos gerados (sem key/erro -> site usa veredito por codigo)' % ger)
+    else:
+        print('Gemini desligado (sem GEMINI_API_KEY) -- veredito gerado por codigo no site.')
+
     with open(DADOS_JSON, 'w', encoding='utf-8') as f:
         json.dump(todos, f, ensure_ascii=False, separators=(',', ':'))
     com_geo = sum(1 for r in todos if 'lat' in r)

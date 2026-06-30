@@ -49,6 +49,7 @@ jobs:
       - name: Gerar site (GitHub Pages)
         env:
           GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python gerar_site.py
 
       - name: Limpar credenciais
