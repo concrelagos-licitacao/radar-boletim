@@ -353,6 +353,8 @@ fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(funct
 
 def main():
     os.makedirs(DOCS, exist_ok=True)
+    # .nojekyll: serve os arquivos crus, sem o GitHub Pages processar via Jekyll
+    open(os.path.join(DOCS, '.nojekyll'), 'w').close()
     hoje = _hoje_brt()
 
     novos = carregar_aba()

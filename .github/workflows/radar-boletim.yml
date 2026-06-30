@@ -6,6 +6,9 @@ on:
     - cron: '0 20 * * *'   # 17:00 BRT (UTC-3) todos os dias
   workflow_dispatch:         # botao "Run workflow" manual no GitHub
 
+permissions:
+  contents: write
+
 jobs:
   boletim:
     runs-on: ubuntu-latest
@@ -57,4 +60,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(site): atualiza boletins [skip ci]"
-          file_pattern: docs/**
+          file_pattern: 'docs/'
