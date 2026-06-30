@@ -1,236 +1,375 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Concrelagos - Radar de Licitacoes</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-  :root{
-    --primary:#3A4149; --header:#2E353D; --accent:#C28E2C; --accent-d:#A9781F;
-    --bg:#F7F8FA; --card:#FFFFFF; --text:#1F2937; --muted:#6B7280;
-    --border:#ECEEF1; --radius:13px;
-    --display:'Inter','Segoe UI',Arial,sans-serif; --body:'Inter','Segoe UI',Arial,sans-serif;
-    --shadow1:0 1px 3px rgba(35,40,46,.07),0 1px 2px rgba(35,40,46,.04);
-    --shadow2:0 10px 28px rgba(35,40,46,.13),0 3px 8px rgba(35,40,46,.06);
-  }
+  :root{--primary:#3A4149;--accent:#C28E2C;--accent-d:#A9781F;--bg:#F0F2F5;--card:#fff;
+    --muted:#6B7280;--border:#E6E8EC;--radius:13px;--body:'Inter','Segoe UI',Arial,sans-serif;
+    --sh:0 1px 3px rgba(35,40,46,.08);--sh2:0 10px 28px rgba(35,40,46,.14)}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:14px}
-  h1,h2,h3,h4{font-family:var(--display);font-weight:700;color:var(--primary);margin:0}
-  .wrap{max-width:1500px;margin:0 auto;padding:18px 22px 60px}
+  body{margin:0;background:var(--bg);color:#1F2937;font-family:var(--body);font-size:14px}
+  h1,h2,h3,h4{margin:0;font-weight:700;color:var(--primary)}
+  .wrap{max-width:1500px;margin:0 auto;padding:18px 20px 60px}
   .hbar{background:#fff;border-bottom:3px solid var(--accent);border-radius:var(--radius);
-    padding:18px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;
-    box-shadow:var(--shadow1),0 14px 30px -18px rgba(194,142,44,.45)}
-  .hbar img.logo{height:46px;width:auto;display:block}
-  .hbar .ti{font-family:var(--display);font-size:1.15rem;color:var(--primary);letter-spacing:.02em}
-  .hbar .s{color:var(--muted);font-size:.84rem;margin-top:3px}
-  .updated{color:var(--muted);text-align:right;font-size:.78rem;white-space:nowrap}
-  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}
+    padding:16px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;box-shadow:var(--sh)}
+  .hbar .ti{font-size:1.2rem;letter-spacing:.02em}.hbar .ti b{color:var(--accent)}
+  .hbar .s{color:var(--muted);font-size:.83rem;margin-top:3px}
+  .updated{color:var(--muted);text-align:right;font-size:.76rem;white-space:nowrap}
+  .tabbar{display:flex;gap:8px;margin:16px 0 14px;flex-wrap:wrap}
+  .tabbtn{font-size:.82rem;font-weight:600;padding:10px 20px;border-radius:11px;border:1px solid var(--primary);
+    background:var(--primary);color:#fff;cursor:pointer;font-family:var(--body);transition:.15s}
+  .tabbtn:hover{background:#2c333a}
+  .tabbtn.on{background:linear-gradient(135deg,#C28E2C,#A9781F);border-color:#C28E2C;box-shadow:0 4px 16px rgba(194,142,44,.32)}
+  .sec{display:none}.sec.on{display:block}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
   .card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);
-    border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow1);transition:transform .2s,box-shadow .2s}
-  .card:hover{transform:translateY(-4px);box-shadow:var(--shadow2)}
-  .card .lbl{font-size:.7rem;text-transform:uppercase;color:var(--muted);letter-spacing:.09em;font-weight:600}
-  .card .val{font-size:1.6rem;font-family:var(--display);color:var(--accent-d);margin-top:6px}
-  .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow1)}
-  .filtros{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+    border-radius:var(--radius);padding:15px 18px;box-shadow:var(--sh);transition:.2s}
+  .card:hover{transform:translateY(-3px);box-shadow:var(--sh2)}
+  .card .lbl{font-size:.68rem;text-transform:uppercase;color:var(--muted);letter-spacing:.08em;font-weight:600}
+  .card .val{font-size:1.6rem;font-weight:700;color:var(--accent-d);margin-top:5px}
+  .card .sub{font-size:.72rem;color:var(--muted);margin-top:2px}
+  .graficos{display:grid;grid-template-columns:1.2fr 1fr 1.2fr;gap:14px;margin-bottom:16px}
+  .gbox{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--sh)}
+  .gbox h4{font-size:.82rem;margin-bottom:10px}.gwrap{position:relative;height:200px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--sh)}
+  .panel h4{font-size:.9rem;margin-bottom:12px}
+  .destaque{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .dcard{border:1px solid var(--border);border-radius:11px;padding:13px 15px;border-left:4px solid #2E7D32;background:#FAFBFC}
+  .dcard .dtop{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px}
+  .dcard .sc{background:#2E7D32;color:#fff;font-size:.68rem;font-weight:700;border-radius:8px;padding:2px 8px;white-space:nowrap}
+  .dcard .dob{font-size:.84rem;color:#1F2937;line-height:1.35;margin:4px 0}
+  .dcard .dmeta{font-size:.72rem;color:var(--muted)}
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
   .fcol{display:flex;flex-direction:column;gap:4px}
-  .fcol label{font-size:.7rem;text-transform:uppercase;color:var(--muted);letter-spacing:.06em;font-weight:600}
-  .fcol input,.fcol select{padding:9px 12px;border:1px solid #CDD2D8;border-radius:10px;font-family:var(--body);font-size:.9rem;background:#fff}
+  .fcol label{font-size:.66rem;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;font-weight:600}
+  .fcol input,.fcol select{padding:8px 11px;border:1px solid #CDD2D8;border-radius:9px;font-size:.86rem;background:#fff;font-family:var(--body)}
   .fcol input:focus,.fcol select:focus{outline:none;border-color:var(--accent)}
-  #busca{min-width:280px}
-  .rangeval{font-size:.8rem;color:var(--accent-d);font-weight:600}
-  .count{color:#6B7280;font-size:.82rem;margin:4px 2px 10px}
-  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px;max-height:68vh}
+  #busca{min-width:210px}#fvalor{width:120px}
+  .rangeval{font-size:.78rem;color:var(--accent-d);font-weight:600}
+  .btn{background:var(--primary);color:#fff;border:0;padding:9px 14px;border-radius:9px;font-size:.8rem;cursor:pointer;font-family:var(--body)}
+  .btn:hover{background:#2c333a}.btn.g{background:linear-gradient(135deg,#C28E2C,#A9781F)}
+  .btn.on{background:linear-gradient(135deg,#C28E2C,#A9781F)}
+  .count{color:var(--muted);font-size:.82rem;margin:4px 2px 10px}
+  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
   table{border-collapse:collapse;width:100%;font-size:.82rem}
-  thead th{position:sticky;top:0;background:var(--primary);color:#E7D9B6;text-align:left;
-    padding:10px 11px;border-bottom:2px solid var(--accent);font-weight:600;font-size:.72rem;
-    text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  thead th{position:sticky;top:0;background:var(--primary);color:#E7D9B6;text-align:left;padding:10px 11px;
+    border-bottom:2px solid var(--accent);font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;cursor:pointer;user-select:none}
+  thead th.nos{cursor:default}thead th .ar{opacity:.5;font-size:.8em;margin-left:3px}
   tbody td{padding:9px 11px;border-bottom:1px solid #F0F1F3;color:#374151;vertical-align:top}
-  tbody tr:nth-child(even){background:#FAFBFC}
-  tbody tr:hover{background:#FBF3E3}
-  .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:9px;padding:2px 9px;font-size:.72rem;font-weight:600}
-  .km{display:inline-block;border-radius:10px;padding:2px 8px;font-size:.72rem;font-weight:600;color:#fff}
+  tbody tr.lin{cursor:pointer}tbody tr.lin:nth-child(4n+1){background:#FAFBFC}
+  tbody tr.lin:hover{background:#FBF3E3}
+  tbody tr.det td{background:#FCF7EC;border-bottom:2px solid var(--border)}
+  .det-box{display:grid;grid-template-columns:2fr 1fr;gap:14px;padding:6px 4px}
+  .det-box .dl{font-size:.7rem;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.04em}
+  .det-box .dv{font-size:.86rem;color:#1F2937;margin:2px 0 10px;line-height:1.4}
+  .star{font-size:1.05rem;color:#D1D5DB;cursor:pointer;line-height:1}.star.on{color:var(--accent)}
+  .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
+  .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:#2E7D32}.km.a{background:#E08A00}.km.c{background:#757575}
-  .obj{max-width:420px;white-space:normal;line-height:1.35}
-  .org{max-width:240px;white-space:normal;color:#4B5563}
-  .btn{background:linear-gradient(135deg,#C28E2C,#A9781F);color:#fff;padding:5px 12px;border-radius:8px;
-    font-size:.74rem;text-decoration:none;white-space:nowrap;display:inline-block}
-  .btn:hover{box-shadow:0 4px 14px rgba(194,142,44,.4)}
-  .novo{background:#2E7D32;color:#fff;border-radius:8px;padding:1px 7px;font-size:.64rem;font-weight:700;margin-left:6px}
+  .sc2{display:inline-block;border-radius:8px;padding:2px 7px;font-size:.7rem;font-weight:700;color:#fff}
+  .urg{display:inline-block;border-radius:7px;padding:1px 6px;font-size:.6rem;font-weight:700;color:#fff;margin-left:5px}
+  .urg.r{background:#C0392B}.urg.o{background:#E08A00}
+  .vlr{font-weight:600;color:#1F2937;white-space:nowrap}
+  .obj{max-width:340px;white-space:normal;line-height:1.35}.org{max-width:180px;white-space:normal;color:#4B5563}
+  .abrir{background:linear-gradient(135deg,#C28E2C,#A9781F);color:#fff;padding:5px 11px;border-radius:8px;font-size:.72rem;text-decoration:none;white-space:nowrap}
+  .novo{background:#2E7D32;color:#fff;border-radius:7px;padding:1px 6px;font-size:.6rem;font-weight:700;margin-left:5px}
+  .pag{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:12px;color:var(--muted);font-size:.82rem}
+  .pag button{background:#fff;border:1px solid #CDD2D8;border-radius:8px;padding:6px 12px;cursor:pointer;font-family:var(--body)}
+  .pag button:disabled{opacity:.4;cursor:default}
+  #mapa{height:560px;border-radius:var(--radius);border:1px solid var(--border)}
+  .maplegend{font-size:.78rem;color:var(--muted);margin:8px 2px}.maplegend b{color:#1F2937}
   #load{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50}
-  .spin{width:46px;height:46px;border:4px solid #E7D9B6;border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
-  @keyframes r{to{transform:rotate(360deg)}}
-  #load p{margin-top:14px;color:var(--muted);font-family:var(--display);font-size:.8rem;letter-spacing:.05em}
-  .err{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px 18px;border-radius:10px;margin:20px 0}
-  .foot{color:var(--muted);font-size:.74rem;text-align:center;margin-top:24px}
-  @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.obj{max-width:none}}
+  .spin{width:44px;height:44px;border:4px solid #E7D9B6;border-top-color:var(--accent);border-radius:50%;animation:r 1s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}#load p{margin-top:12px;color:var(--muted);font-size:.8rem}
+  .foot{color:var(--muted);font-size:.73rem;text-align:center;margin-top:22px}
+  @media(max-width:980px){.cards{grid-template-columns:repeat(2,1fr)}.graficos,.destaque{grid-template-columns:1fr}.obj{max-width:none}.det-box{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
   <div id="load"><div class="spin"></div><p>Carregando radar...</p></div>
-
   <div class="wrap" id="app" style="display:none">
+    <h2 class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden">Radar de licitacoes Concrelagos: visao geral, editais e mapa.</h2>
     <div class="hbar">
       <div style="display:flex;align-items:center;gap:16px">
-        <img class="logo" src="logo.png" alt="Concrelagos" onerror="this.style.display='none'">
-        <div>
-          <div class="ti">Radar de Licitacoes</div>
-          <div class="s">Concreto e brita - monitoramento PNCP, Diario Oficial e Licitar Digital</div>
-        </div>
+        <img src="logo.png" alt="Concrelagos" style="height:46px" onerror="this.style.display='none'">
+        <div><div class="ti">Radar de Licitacoes <b>Concrelagos</b></div>
+        <div class="s">Concreto e brita - PNCP, Diario Oficial e Licitar Digital</div></div>
       </div>
-      <div class="updated">Atualizado<br><b>30/06/2026 12:32</b></div>
+      <div class="updated">Atualizado<br><b>30/06/2026 13:27</b></div>
     </div>
 
     <div id="erro"></div>
 
-    <div class="cards">
-      <div class="card"><div class="lbl">Editais no historico</div><div class="val">9</div></div>
-      <div class="card"><div class="lbl">Novos hoje</div><div class="val">9</div></div>
-      <div class="card"><div class="lbl">Exibindo agora</div><div class="val" id="kpiVis">-</div></div>
-      <div class="card"><div class="lbl">Estados (UF)</div><div class="val" id="kpiUf">-</div></div>
+    <div class="tabbar">
+      <button class="tabbtn on" data-t="geral">Visao Geral</button>
+      <button class="tabbtn" data-t="editais">Editais</button>
+      <button class="tabbtn" data-t="mapa">Mapa</button>
     </div>
 
-    <div class="panel">
-      <div class="filtros">
-        <div class="fcol" style="flex:1">
-          <label>Buscar (objeto, orgao, municipio, numero)</label>
-          <input id="busca" placeholder="Ex.: concreto usinado, prefeitura, brita...">
-        </div>
-        <div class="fcol">
-          <label>UF</label>
-          <select id="fuf"><option value="">Todas</option></select>
-        </div>
-        <div class="fcol">
-          <label>Fonte</label>
-          <select id="ffonte"><option value="">Todas</option></select>
-        </div>
-        <div class="fcol">
-          <label>Distancia max: <span class="rangeval" id="kmval">qualquer</span></label>
-          <input type="range" id="fkm" min="0" max="1000" step="25" value="1000">
-        </div>
-        <div class="fcol">
-          <label>Periodo (sessao)</label>
-          <select id="fper">
-            <option value="">Tudo</option>
-            <option value="fut">So futuros</option>
-            <option value="7">Proximos 7 dias</option>
-            <option value="30">Proximos 30 dias</option>
-          </select>
-        </div>
-        <div class="fcol">
-          <label>&nbsp;</label>
-          <button class="btn" id="limpar" style="border:0;cursor:pointer;padding:9px 14px">Limpar filtros</button>
-        </div>
+    <div class="sec on" id="s-geral">
+      <div class="cards">
+        <div class="card"><div class="lbl">No historico</div><div class="val">10</div><div class="sub">editais acumulados</div></div>
+        <div class="card"><div class="lbl">Novos hoje</div><div class="val">10</div><div class="sub">ultima coleta</div></div>
+        <div class="card"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">de uma unidade</div></div>
+        <div class="card"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">editais marcados (★)</div></div>
       </div>
-      <div class="count" id="count"></div>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr>
-            <th>Sessao</th><th>UF</th><th>Municipio</th><th>Orgao</th>
-            <th>Objeto</th><th>Fonte</th><th>Dist.</th><th>Tipo</th><th>Edital</th>
-          </tr></thead>
-          <tbody id="tbody"></tbody>
-        </table>
+      <div class="graficos">
+        <div class="gbox"><h4>Editais por estado (UF)</h4><div class="gwrap"><canvas id="cUf"></canvas></div></div>
+        <div class="gbox"><h4>Por fonte</h4><div class="gwrap"><canvas id="cFonte"></canvas></div></div>
+        <div class="gbox"><h4>Por distancia da unidade</h4><div class="gwrap"><canvas id="cKm"></canvas></div></div>
+      </div>
+      <div class="panel">
+        <h4>Melhores oportunidades agora <span style="font-weight:400;color:var(--muted);font-size:.8rem">(proximidade + prazo + valor)</span></h4>
+        <div class="destaque" id="destaque"></div>
       </div>
     </div>
 
-    <div class="foot">
-      Concrelagos - Equipe Juridica - dados publicos (PNCP / Diario Oficial). Atualizado automaticamente todo dia as 7h.
+    <div class="sec" id="s-editais">
+      <div class="panel">
+        <div class="filtros">
+          <div class="fcol" style="flex:1"><label>Buscar (objeto, orgao, municipio, numero)</label><input id="busca" placeholder="Ex.: concreto usinado, brita, prefeitura..."></div>
+          <div class="fcol"><label>UF</label><select id="fuf"><option value="">Todas</option></select></div>
+          <div class="fcol"><label>Fonte</label><select id="ffonte"><option value="">Todas</option></select></div>
+          <div class="fcol"><label>Modalidade</label><select id="fmod"><option value="">Todas</option></select></div>
+          <div class="fcol"><label>Situacao</label><select id="fsit"><option value="">Todas</option><option value="ab">Abertas (sessao futura)</option><option value="en">Encerradas</option></select></div>
+          <div class="fcol"><label>Valor minimo (R$)</label><input id="fvalor" type="number" min="0" step="10000" placeholder="0"></div>
+          <div class="fcol"><label>Distancia max: <span class="rangeval" id="kmval">qualquer</span></label><input type="range" id="fkm" min="0" max="1000" step="25" value="1000"></div>
+        </div>
+        <div class="filtros">
+          <div class="fcol"><label>&nbsp;</label><button class="btn g" id="bprox">Melhores oportunidades</button></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bfav">★ So acompanhados</button></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bcsv">Exportar CSV</button></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="blimpar">Limpar</button></div>
+        </div>
+        <div class="count" id="count"></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th class="nos">★</th>
+              <th data-c="score">Score<span class="ar"></span></th>
+              <th data-c="data">Sessao<span class="ar"></span></th>
+              <th data-c="uf">UF<span class="ar"></span></th>
+              <th data-c="mun">Municipio<span class="ar"></span></th>
+              <th class="nos">Orgao</th>
+              <th class="nos">Objeto</th>
+              <th data-c="valor">Valor<span class="ar"></span></th>
+              <th data-c="fonte">Fonte<span class="ar"></span></th>
+              <th data-c="km">Dist.<span class="ar"></span></th>
+              <th class="nos">Edital</th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="pag" id="pag"></div>
+      </div>
     </div>
+
+    <div class="sec" id="s-mapa">
+      <div class="panel">
+        <h4>Mapa de oportunidades</h4>
+        <div class="maplegend">Cada ponto e um <b>edital</b> (municipio publico). Cor pela distancia:
+          <span class="km v">ate 50</span> <span class="km a">51-150</span> <span class="km c">+150 km</span>. As unidades da Concrelagos nao aparecem.</div>
+        <div id="mapa"></div>
+      </div>
+    </div>
+
+    <div class="foot">Concrelagos - Equipe Juridica - dados publicos (PNCP / Diario Oficial) - atualizado todo dia as 7h e 17h</div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-var DADOS=[], HOJE="2026-06-30";
+var DADOS=[],VIS=[],HOJE="2026-06-30",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=25,abertos={},soFav=false;
+var FAV={};try{FAV=JSON.parse(localStorage.getItem('cl_fav')||'{}');}catch(e){FAV={};}
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
+function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
+function kmNum(r){var n=parseFloat(g(r,'DISTANCIA KM').replace(',','.'));return isNaN(n)?null:n;}
+function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
+function valNum(r){var v=g(r,'VALOR').replace(/\./g,'').replace(',','.');var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
+function fmtBRL(n){if(n==null)return '-';return 'R$ '+n.toLocaleString('pt-BR',{maximumFractionDigits:0});}
+function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
+function favKey(r){return g(r,'NUMERO')||g(r,'LINK')||(g(r,'DATA SESSAO')+'|'+g(r,'ORGAO')+'|'+g(r,'OBJETO').slice(0,40));}
+function isFav(r){return !!FAV[favKey(r)];}
+function toggleFav(r){var k=favKey(r);if(FAV[k])delete FAV[k];else FAV[k]=1;try{localStorage.setItem('cl_fav',JSON.stringify(FAV));}catch(e){}}
+var $=function(i){return document.getElementById(i);};
 
-function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;
-  var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
-function kmNum(r){var v=g(r,'DISTANCIA KM').replace(',','.');var n=parseFloat(v);return isNaN(n)?null:n;}
-function kmCls(n){if(n==null)return '';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
+// SCORE: proximidade (frete) + prazo util + porte do edital (valor)
+function score(r){
+  var km=kmNum(r),sk=(km==null?20:Math.max(0,100-km/3));
+  var d=diasAte(r),sp;
+  if(d==null)sp=30;else if(d<0)sp=0;else if(d<=3)sp=55;else if(d<=30)sp=100-(d-3)*1.2;else sp=Math.max(20,70-(d-30)*0.5);
+  var v=valNum(r),sv;
+  if(v==null)sv=40;else if(v>=2e6)sv=100;else if(v>=5e5)sv=80;else if(v>=1e5)sv=60;else if(v>=2e4)sv=40;else sv=25;
+  return Math.round(sk*0.45+sp*0.30+sv*0.25);
+}
+function scCor(s){return s>=70?'#2E7D32':s>=45?'#E08A00':'#9CA3AF';}
+function urg(r){var d=diasAte(r);if(d==null||d<0)return '';if(d<=3)return '<span class="urg r">'+d+'d</span>';if(d<=7)return '<span class="urg o">'+d+'d</span>';return '';}
 
 function popular(){
-  var ufs={},fontes={};
-  DADOS.forEach(function(r){var u=g(r,'UF');if(u)ufs[u]=1;var f=g(r,'FONTE');if(f)fontes[f]=1;});
-  var su=document.getElementById('fuf');
-  Object.keys(ufs).sort().forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=u;su.appendChild(o);});
-  var sf=document.getElementById('ffonte');
-  Object.keys(fontes).sort().forEach(function(f){var o=document.createElement('option');o.value=f;o.textContent=f;sf.appendChild(o);});
-  document.getElementById('kpiUf').textContent=Object.keys(ufs).length;
+  var u={},f={},m={};
+  DADOS.forEach(function(r){if(g(r,'UF'))u[g(r,'UF')]=1;if(g(r,'FONTE'))f[g(r,'FONTE')]=1;if(g(r,'MODALIDADE'))m[g(r,'MODALIDADE')]=1;});
+  Object.keys(u).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('fuf').appendChild(o);});
+  Object.keys(f).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('ffonte').appendChild(o);});
+  Object.keys(m).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('fmod').appendChild(o);});
 }
 
-function filtrar(){
-  var q=document.getElementById('busca').value.toLowerCase().trim();
-  var uf=document.getElementById('fuf').value;
-  var fonte=document.getElementById('ffonte').value;
-  var kmMax=+document.getElementById('fkm').value;
-  var per=document.getElementById('fper').value;
-  document.getElementById('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
+function aplicar(){
+  var q=$('busca').value.toLowerCase().trim(),uf=$('fuf').value,fo=$('ffonte').value,mo=$('fmod').value,
+      sit=$('fsit').value,vmin=parseFloat($('fvalor').value)||0,kmMax=+$('fkm').value;
+  $('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
   var hoje=new Date();hoje.setHours(0,0,0,0);
-
-  var out=DADOS.filter(function(r){
-    if(uf && g(r,'UF')!==uf)return false;
-    if(fonte && g(r,'FONTE')!==fonte)return false;
+  VIS=DADOS.filter(function(r){
+    if(soFav&&!isFav(r))return false;
+    if(uf&&g(r,'UF')!==uf)return false;
+    if(fo&&g(r,'FONTE')!==fo)return false;
+    if(mo&&g(r,'MODALIDADE')!==mo)return false;
+    if(vmin>0){var v=valNum(r);if(v==null||v<vmin)return false;}
     if(kmMax<1000){var n=kmNum(r);if(n==null||n>kmMax)return false;}
-    if(per){
-      var dt=parseBR(g(r,'DATA SESSAO'));
-      if(per==='fut'){if(!dt||dt<hoje)return false;}
-      else{var lim=new Date(hoje);lim.setDate(lim.getDate()+(+per));if(!dt||dt<hoje||dt>lim)return false;}
-    }
-    if(q){
-      var blob=(g(r,'OBJETO')+' '+g(r,'ORGAO')+' '+g(r,'MUNICIPIO')+' '+g(r,'NUMERO')+' '+g(r,'UF')).toLowerCase();
-      if(blob.indexOf(q)<0)return false;
-    }
+    if(sit){var dt=parseBR(g(r,'DATA SESSAO'));if(sit==='ab'){if(!dt||dt<hoje)return false;}else{if(dt&&dt>=hoje)return false;}}
+    if(q){var b=(g(r,'OBJETO')+' '+g(r,'ORGAO')+' '+g(r,'MUNICIPIO')+' '+g(r,'NUMERO')+' '+g(r,'UF')).toLowerCase();if(b.indexOf(q)<0)return false;}
     return true;
   });
-  render(out);
+  pg=0;abertos={};ordenar();render();kpis();graficos();destaque();mapa();
 }
 
-function render(rows){
-  var tb=document.getElementById('tbody');
-  document.getElementById('count').textContent=rows.length+' edital(is) - de '+DADOS.length+' no historico';
-  document.getElementById('kpiVis').textContent=rows.length;
-  if(!rows.length){tb.innerHTML='<tr><td colspan="9" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';return;}
+function ordenar(){
+  var c=ordCol,d=ordDir;
+  VIS.sort(function(a,b){
+    var va,vb;
+    if(c==='score'){va=score(a);vb=score(b);}
+    else if(c==='valor'){va=valNum(a);vb=valNum(b);va=(va==null?-1:va);vb=(vb==null?-1:vb);}
+    else if(c==='data'){va=parseBR(g(a,'DATA SESSAO'));vb=parseBR(g(b,'DATA SESSAO'));va=va?va.getTime():0;vb=vb?vb.getTime():0;}
+    else if(c==='km'){va=kmNum(a);vb=kmNum(b);va=(va==null?1e9:va);vb=(vb==null?1e9:vb);}
+    else if(c==='uf'){va=g(a,'UF');vb=g(b,'UF');}
+    else if(c==='mun'){va=g(a,'MUNICIPIO');vb=g(b,'MUNICIPIO');}
+    else if(c==='fonte'){va=g(a,'FONTE');vb=g(b,'FONTE');}
+    if(va<vb)return -1*d;if(va>vb)return 1*d;return 0;
+  });
+  document.querySelectorAll('thead th[data-c]').forEach(function(th){th.querySelector('.ar').textContent=(th.getAttribute('data-c')===c?(d>0?'▲':'▼'):'');});
+}
+
+function kpis(){
+  var kms=VIS.map(kmNum).filter(function(x){return x!=null;});
+  if(kms.length){$('kMin').textContent=Math.round(Math.min.apply(null,kms))+' km';$('kMinL').textContent='unidade mais perto (filtros)';}
+  else{$('kMin').textContent='-';$('kMinL').textContent='sem distancia calculada';}
+  $('kFav').textContent=DADOS.filter(isFav).length;
+}
+
+function destaque(){
+  var top=VIS.slice().sort(function(a,b){return score(b)-score(a);}).slice(0,6),h='';
+  top.forEach(function(r){
+    var s=score(r),km=kmNum(r),d=diasAte(r),v=valNum(r);
+    h+='<div class="dcard" style="border-left-color:'+scCor(s)+'">'
+      +'<div class="dtop"><span class="uf">'+esc(g(r,'UF'))+' '+esc(g(r,'MUNICIPIO'))+'</span><span class="sc" style="background:'+scCor(s)+'">Score '+s+'</span></div>'
+      +'<div class="dob">'+esc(g(r,'OBJETO')).slice(0,105)+'</div>'
+      +'<div class="dmeta">'+(km==null?'dist. n/d':Math.round(km)+' km')+' · '+(d==null?'sessao n/d':(d<0?'sessao passou':'sessao em '+d+' dias'))+(v==null?'':' · '+fmtBRL(v))+'</div>'
+      +'</div>';
+  });
+  $('destaque').innerHTML=h||'<div style="color:#9CA3AF;font-size:.85rem">Sem editais nos filtros atuais.</div>';
+}
+
+function linDet(r){
+  var d=diasAte(r),v=valNum(r);
+  return '<div class="det-box"><div>'
+    +'<div class="dl">Objeto completo</div><div class="dv">'+esc(g(r,'OBJETO'))+'</div>'
+    +'<div class="dl">Orgao</div><div class="dv">'+esc(g(r,'ORGAO'))+'</div></div><div>'
+    +'<div class="dl">Valor estimado</div><div class="dv">'+fmtBRL(v)+'</div>'
+    +'<div class="dl">Modalidade</div><div class="dv">'+(esc(g(r,'MODALIDADE'))||'-')+'</div>'
+    +'<div class="dl">Numero</div><div class="dv">'+(esc(g(r,'NUMERO'))||'-')+'</div>'
+    +'<div class="dl">Prazo</div><div class="dv">'+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+'</div>'
+    +(g(r,'LINK').indexOf('http')===0?'<a class="abrir" href="'+esc(g(r,'LINK'))+'" target="_blank" rel="noopener">Abrir edital na fonte</a>':'')
+    +'</div></div>';
+}
+
+function render(){
+  $('count').textContent=VIS.length+' edital(is) - de '+DADOS.length+' no historico'+(soFav?' (so acompanhados)':'');
+  var tb=$('tbody'),ini=pg*PP,page=VIS.slice(ini,ini+PP);
+  if(!VIS.length){tb.innerHTML='<tr><td colspan="11" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';$('pag').innerHTML='';return;}
   var h='';
-  rows.forEach(function(r){
-    var n=kmNum(r),km=(n==null?'-':'<span class="km '+kmCls(n)+'">'+Math.round(n)+' km</span>');
-    var link=g(r,'LINK');
-    var btn=(link.indexOf('http')===0)?'<a class="btn" href="'+esc(link)+'" target="_blank" rel="noopener">Abrir</a>':'-';
-    var novo=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
-    h+='<tr>'
-      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+novo+'</td>'
-      +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td>'
-      +'<td>'+esc(g(r,'MUNICIPIO'))+'</td>'
-      +'<td class="org">'+esc(g(r,'ORGAO'))+'</td>'
-      +'<td class="obj">'+esc(g(r,'OBJETO'))+'</td>'
-      +'<td>'+esc(g(r,'FONTE'))+'</td>'
-      +'<td>'+km+'</td>'
-      +'<td>'+esc(g(r,'TIPO'))+'</td>'
-      +'<td>'+btn+'</td>'
-      +'</tr>';
+  page.forEach(function(r,idx){
+    var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>');
+    var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir</a>':'-';
+    var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
+    h+='<tr class="lin" data-i="'+gi+'">'
+      +'<td><span class="star '+(isFav(r)?'on':'')+'" data-f="'+gi+'">'+(isFav(r)?'★':'☆')+'</span></td>'
+      +'<td><span class="sc2" style="background:'+scCor(s)+'">'+s+'</span></td>'
+      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+urg(r)+nv+'</td>'
+      +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
+      +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
+      +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
+      +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+'</td><td>'+bt+'</td></tr>';
+    if(abertos[gi])h+='<tr class="det"><td colspan="11">'+linDet(r)+'</td></tr>';
   });
   tb.innerHTML=h;
+  document.querySelectorAll('tbody tr.lin').forEach(function(tr){tr.addEventListener('click',function(){var i=tr.getAttribute('data-i');abertos[i]=!abertos[i];render();});});
+  document.querySelectorAll('tbody .star').forEach(function(st){st.addEventListener('click',function(ev){ev.stopPropagation();var i=+st.getAttribute('data-f');toggleFav(VIS[i]);kpis();if(soFav)aplicar();else render();});});
+  var tot=Math.ceil(VIS.length/PP);
+  $('pag').innerHTML='<button id="pant" '+(pg<=0?'disabled':'')+'>&larr; Anterior</button> Pagina '+(pg+1)+' de '+tot+' <button id="pprox" '+(pg>=tot-1?'disabled':'')+'>Proxima &rarr;</button>';
+  if($('pant'))$('pant').onclick=function(){if(pg>0){pg--;render();}};
+  if($('pprox'))$('pprox').onclick=function(){if(pg<tot-1){pg++;render();}};
 }
 
-['busca','fuf','ffonte','fkm','fper'].forEach(function(id){
-  document.getElementById(id).addEventListener('input',filtrar);
-  document.getElementById(id).addEventListener('change',filtrar);
-});
-document.getElementById('limpar').addEventListener('click',function(){
-  document.getElementById('busca').value='';document.getElementById('fuf').value='';
-  document.getElementById('ffonte').value='';document.getElementById('fkm').value=1000;
-  document.getElementById('fper').value='';filtrar();
-});
+function cont(arr,fn){var m={};arr.forEach(function(r){var k=fn(r);if(k==null)return;m[k]=(m[k]||0)+1;});return m;}
+function opt(leg){return{responsive:true,maintainAspectRatio:false,plugins:{legend:leg?{position:'bottom',labels:{font:{size:11},boxWidth:12}}:{display:false}},scales:leg?{}:{x:{ticks:{font:{size:10}},grid:{display:false}},y:{ticks:{font:{size:10},precision:0},beginAtZero:true}}};}
+function graficos(){
+  var pu=cont(VIS,function(r){return g(r,'UF')||null;}),pf=cont(VIS,function(r){return g(r,'FONTE')||null;});
+  var fa={'Ate 50 km':0,'51-150 km':0,'151-300 km':0,'+300 km':0,'Sem dist.':0};
+  VIS.forEach(function(r){var n=kmNum(r);if(n==null)fa['Sem dist.']++;else if(n<=50)fa['Ate 50 km']++;else if(n<=150)fa['51-150 km']++;else if(n<=300)fa['151-300 km']++;else fa['+300 km']++;});
+  for(var k in CH){CH[k].destroy();}
+  var uk=Object.keys(pu).sort(function(a,b){return pu[b]-pu[a];});
+  CH.uf=new Chart($('cUf'),{type:'bar',data:{labels:uk,datasets:[{data:uk.map(function(k){return pu[k];}),backgroundColor:'#3A4149',borderRadius:4}]},options:opt(false)});
+  CH.fonte=new Chart($('cFonte'),{type:'doughnut',data:{labels:Object.keys(pf),datasets:[{data:Object.values(pf),backgroundColor:['#C28E2C','#3A4149','#1565C0','#2E7D32','#9CA3AF']}]},options:opt(true)});
+  CH.km=new Chart($('cKm'),{type:'bar',data:{labels:Object.keys(fa),datasets:[{data:Object.values(fa),backgroundColor:['#2E7D32','#E08A00','#C2410C','#757575','#C9CDD3'],borderRadius:4}]},options:opt(false)});
+}
+
+function mapa(){
+  if(typeof L==='undefined')return;
+  if(!MAP){MAP=L.map('mapa').setView([-19.9,-44.0],6);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap'}).addTo(MAP);}
+  if(LCAM){MAP.removeLayer(LCAM);}
+  LCAM=L.layerGroup();var pts=[];
+  VIS.forEach(function(r){
+    if(typeof r.lat!=='number'||typeof r.lon!=='number')return;
+    var km=kmNum(r),cor=(km==null?'#757575':km<=50?'#2E7D32':km<=150?'#E08A00':'#757575'),v=valNum(r);
+    var m=L.circleMarker([r.lat,r.lon],{radius:7,color:'#fff',weight:1,fillColor:cor,fillOpacity:.9});
+    m.bindPopup('<b>'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</b><br>'+esc(g(r,'OBJETO')).slice(0,120)+'<br><small>'+(km==null?'dist. n/d':Math.round(km)+' km')+(v==null?'':' · '+fmtBRL(v))+' · '+esc(g(r,'FONTE'))+'</small>'+(g(r,'LINK').indexOf('http')===0?'<br><a href="'+esc(g(r,'LINK'))+'" target="_blank">Abrir edital</a>':''));
+    LCAM.addLayer(m);pts.push([r.lat,r.lon]);
+  });
+  LCAM.addTo(MAP);
+  if(pts.length){try{MAP.fitBounds(pts,{padding:[40,40],maxZoom:9});}catch(e){}}
+  setTimeout(function(){MAP.invalidateSize();},120);
+}
+
+function exportarCSV(){
+  var cols=['DATA SESSAO','UF','MUNICIPIO','ORGAO','OBJETO','FONTE','VALOR','MODALIDADE','DISTANCIA KM','NUMERO','LINK'];
+  var lin=[(['SCORE','FAVORITO'].concat(cols)).join(';')];
+  VIS.forEach(function(r){lin.push(([score(r),isFav(r)?'sim':''].concat(cols.map(function(c){var v=g(r,c).replace(/"/g,'""');return /[;"\n]/.test(v)?'"'+v+'"':v;}))).join(';'));});
+  var blob=new Blob(['﻿'+lin.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='radar_concrelagos.csv';a.click();
+}
+
+document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.remove('on');});
+  document.querySelectorAll('.sec').forEach(function(x){x.classList.remove('on');});
+  b.classList.add('on');$('s-'+b.getAttribute('data-t')).classList.add('on');
+  if(b.getAttribute('data-t')==='mapa')setTimeout(mapa,60);
+});});
+['busca','fuf','ffonte','fmod','fsit','fvalor','fkm'].forEach(function(i){$(i).addEventListener('input',aplicar);$(i).addEventListener('change',aplicar);});
+document.querySelectorAll('thead th[data-c]').forEach(function(th){th.addEventListener('click',function(){var c=th.getAttribute('data-c');if(ordCol===c)ordDir*=-1;else{ordCol=c;ordDir=(c==='km'?1:-1);}pg=0;ordenar();render();});});
+$('bprox').addEventListener('click',function(){ordCol='score';ordDir=-1;pg=0;ordenar();render();document.querySelector('.tabbtn[data-t=editais]').click();});
+$('bfav').addEventListener('click',function(){soFav=!soFav;$('bfav').classList.toggle('on',soFav);aplicar();});
+$('bcsv').addEventListener('click',exportarCSV);
+$('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;$('bfav').classList.remove('on');ordCol='data';ordDir=-1;aplicar();});
 
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-  DADOS=d||[];
-  document.getElementById('load').style.display='none';
-  document.getElementById('app').style.display='block';
-  popular();filtrar();
-}).catch(function(e){
-  document.getElementById('load').style.display='none';
-  document.getElementById('app').style.display='block';
-  document.getElementById('erro').innerHTML='<div class="err">Nao foi possivel carregar os dados (dados.json). Tente recarregar a pagina.</div>';
+  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();aplicar();
+}).catch(function(){
+  $('load').style.display='none';$('app').style.display='block';
+  $('erro').innerHTML='<div style="background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px;border-radius:10px;margin:16px 0">Nao foi possivel carregar os dados. Recarregue a pagina.</div>';
 });
 </script>
 </body>
