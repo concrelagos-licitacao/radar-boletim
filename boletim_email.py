@@ -7,8 +7,8 @@ from datetime import date
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 
-EMAIL_TO   = os.environ.get('EMAIL_TO', 'geone.muruci@gmail.com')
-EMAIL_FROM = os.environ.get('EMAIL_FROM', 'licitacao@concrelagos.com.br')
+EMAIL_TO   = os.environ.get('EMAIL_TO', 'licitacao.concrelagos@gmail.com')
+EMAIL_FROM = os.environ.get('EMAIL_FROM', 'licitacao.concrelagos@gmail.com')
 EMAIL_PASS = os.environ.get('GMAIL_APP_PASSWORD', '')
 EMAIL_CC   = os.environ.get('EMAIL_CC', '')
 

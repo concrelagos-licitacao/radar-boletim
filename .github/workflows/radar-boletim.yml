@@ -42,6 +42,18 @@ jobs:
           EMAIL_CC: ${{ secrets.EMAIL_CC }}
         run: python boletim_email.py
 
+      - name: Gerar site (GitHub Pages)
+        env:
+          GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+        run: python gerar_site.py
+
       - name: Limpar credenciais
         if: always()
         run: rm -f credenciais/service_account.json
+
+      - name: Commit do site
+        if: success()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(site): atualiza boletins [skip ci]"
+          file_pattern: docs/**
