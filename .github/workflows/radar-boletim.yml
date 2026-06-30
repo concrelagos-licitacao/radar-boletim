@@ -33,6 +33,15 @@ jobs:
           HAVERSINE_AJUSTE_FATOR: '1.0'
         run: python radar.py
 
+      - name: Enviar boletim por e-mail
+        env:
+          GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_CC: ${{ secrets.EMAIL_CC }}
+        run: python boletim_email.py
+
       - name: Limpar credenciais
         if: always()
         run: rm -f credenciais/service_account.json
