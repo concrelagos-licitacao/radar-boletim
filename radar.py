@@ -57,6 +57,20 @@ _GEO_CACHE = {}
 _geocoder_inst = [None]
 _GEO_OFF = [False]      # disjuntor: desliga geocoding se Nominatim cair
 _GEO_FALHAS = [0]       # falhas/timeouts consecutivos
+_BASE_MUN = {}          # base local IBGE: (nome_norm, UF) -> (lat, lon)
+
+def _carregar_base_mun():
+    if _BASE_MUN:
+        return _BASE_MUN
+    try:
+        import csv
+        with open('municipios_br.csv', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                _BASE_MUN[(row['nome_norm'], row['uf'].upper())] = (float(row['lat']), float(row['lon']))
+        print("  BASE MUNICIPIOS: %d carregados (geocoding local, sem rede)" % len(_BASE_MUN))
+    except Exception as e:
+        print("  BASE MUNICIPIOS indisponivel (%s) -- caira no Nominatim" % repr(e)[:50])
+    return _BASE_MUN
 
 def _haversine_km(p1, p2):
     lat1, lng1 = map(radians, p1)
@@ -66,9 +80,13 @@ def _haversine_km(p1, p2):
     return 6371.0 * 2 * asin(sqrt(a)) * HAVERSINE_AJUSTE
 
 def _geocode(municipio, uf):
-    key = (_n(municipio), uf.upper())
+    key = (_n(municipio).strip(), uf.upper())
     if key in _GEO_CACHE:
         return _GEO_CACHE[key]
+    hit = _carregar_base_mun().get(key)   # 1o: base local IBGE (instantaneo, sem rede)
+    if hit:
+        _GEO_CACHE[key] = hit
+        return hit
     if _GEO_OFF[0]:        # disjuntor aberto: nao bate mais no Nominatim
         return None
     try:
