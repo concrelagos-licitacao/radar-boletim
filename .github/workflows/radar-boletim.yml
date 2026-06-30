@@ -3,6 +3,7 @@ name: Boletim Licitacoes
 on:
   schedule:
     - cron: '0 10 * * *'   # 07:00 BRT (UTC-3) todos os dias
+    - cron: '0 20 * * *'   # 17:00 BRT (UTC-3) todos os dias
   workflow_dispatch:         # botao "Run workflow" manual no GitHub
 
 jobs:
