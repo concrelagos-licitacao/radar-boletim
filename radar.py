@@ -152,9 +152,15 @@ ini = hoje - datetime.timedelta(days=14)
 registros = []      # cada um: dict fonte/uf/municipio/orgao/objeto/data_sessao/data_pub/numero/link/uid
 PNCP_TRUNC = []     # UFs em que o PNCP truncou (integra=False) -> vira ALERTA
 
+# orcamento de tempo: as coletas param e entregam o que houver antes de estourar o job
+_COLETA_T0 = time.monotonic()
+_COLETA_BUDGET = float(os.environ.get('COLETA_BUDGET_S', '780'))   # ~13 min teto p/ as 3 coletas
+def _tempo_ok():
+    return (time.monotonic() - _COLETA_T0) < _COLETA_BUDGET
+
 # ---------- 1) PNCP ----------
 def pncp_get(url):
-    for i in range(6):
+    for i in range(3):
         try: r = requests.get(url, timeout=50, headers=UA)
         except Exception: time.sleep(1.5*(i+1)); continue
         if r.status_code == 204: return {'data': [], 'totalPaginas': 0}
@@ -168,8 +174,10 @@ def pncp_get(url):
 def coleta_pncp():
     n = 0
     for uf in UFS:
+        if not _tempo_ok(): break
         pag, tot, ok = 1, 1, True
         while pag <= tot and pag <= 80:
+            if not _tempo_ok(): break
             url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
                    '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
                    % (ini.strftime('%Y%m%d'), hoje.strftime('%Y%m%d'), uf, pag))
@@ -226,9 +234,11 @@ def coleta_licitar():
     H = {**UA, 'Content-Type': 'application/json', 'Accept': 'application/json'}
     URL = 'https://manager-api.licitardigital.com.br/auction-notice/doSearchAuctionNotice'
     for uf in UFS:
+        if not _tempo_ok(): break
         for termo in ('concreto', 'brita'):
             offset, vazias = 0, 0
             while offset <= 600:
+                if not _tempo_ok(): break
                 body = {'filter': {'search': termo, 'auctionType': 'E', 'state': uf}, 'offset': offset}
                 try:
                     r = requests.post(URL, headers=H, data=json.dumps(body), timeout=40)
