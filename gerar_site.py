@@ -457,7 +457,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="sec" id="s-mapa">
       <div class="panel">
         <div class="clhead"><span class="ht">Mapa de oportunidades</span><span class="hs">cada ponto e um edital (municipio publico)</span></div>
-        <div class="maplegend">Cor pela distancia da unidade: <span class="km v">ate 50</span> <span class="km a">51-150</span> <span class="km c">+150 km</span>. As unidades da Concrelagos nao aparecem.</div>
+        <div class="maplegend">Editais por distancia: <span class="km v">ate 50</span> <span class="km a">51-150</span> <span class="km c">+150 km</span><span id="leg-fil" style="display:none"> &nbsp;|&nbsp; Unidades: <span class="km" style="background:#1E40AF">usina</span> <span class="km" style="background:#166534">pedreira</span></span></div>
         <div id="mapa"></div>
       </div>
     </div>
@@ -687,9 +687,28 @@ function graficos(){
   CH.km=new Chart($('cKm'),{type:'bar',data:{labels:Object.keys(fa),datasets:[{data:Object.values(fa),backgroundColor:['#2E7D32','#E08A00','#C2410C','#757575','#C9CDD3'],borderRadius:4}]},options:opt(false)});
 }
 
+var LFIL=null,FILADD=false;
+function filiaisMapa(){
+  if(FILADD||typeof L==='undefined'||!MAP)return;
+  FILADD=true;
+  fetch('filiais.json?v='+Date.now()).then(function(r){return r.ok?r.json():[];}).then(function(fs){
+    if(!fs||!fs.length)return;
+    LFIL=L.layerGroup();
+    fs.forEach(function(f){
+      if(typeof f.lat!=='number'||typeof f.lon!=='number')return;
+      var ped=(f.tipo||'').indexOf('pedreira')>=0,cor=ped?'#166534':'#1E40AF';
+      var m=L.circleMarker([f.lat,f.lon],{radius:8,color:'#fff',weight:2,fillColor:cor,fillOpacity:1});
+      m.bindPopup('<b>'+esc(f.nome||(ped?'Pedreira':'Usina'))+'</b><br><small>'+esc(f.municipio||'')+'/'+esc(f.uf||'')+' · '+(ped?'pedreira':'usina')+'</small>');
+      LFIL.addLayer(m);
+    });
+    LFIL.addTo(MAP);
+    document.getElementById('leg-fil').style.display='inline';
+  }).catch(function(){});
+}
 function mapa(){
   if(typeof L==='undefined')return;
   if(!MAP){MAP=L.map('mapa').setView([-19.9,-44.0],6);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap'}).addTo(MAP);}
+  filiaisMapa();
   if(LCAM){MAP.removeLayer(LCAM);}
   LCAM=L.layerGroup();var pts=[];
   VIS.forEach(function(r){
@@ -740,6 +759,48 @@ fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(funct
 </html>"""
 
 
+def gerar_filiais_json():
+    """SO gera docs/filiais.json se MOSTRAR_FILIAIS estiver setado (site protegido).
+    Trava de seguranca: sem a flag, as filiais NUNCA sao publicadas."""
+    if not os.environ.get('MOSTRAR_FILIAIS', '').strip():
+        # garante que nao sobra um filiais.json antigo exposto
+        p = os.path.join(DOCS, 'filiais.json')
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+        return 0
+    try:
+        creds = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
+        gc = gspread.service_account(filename=creds)
+        vals = gc.open_by_key(SHEET_ID).worksheet('Filiais').get_all_values()
+        if len(vals) < 2:
+            return 0
+        hdr = {h.strip().lower(): i for i, h in enumerate(vals[0])}
+
+        def cel(row, k):
+            i = hdr.get(k)
+            return (row[i].strip() if i is not None and i < len(row) else '')
+        out = []
+        for row in vals[1:]:
+            try:
+                lat = float(cel(row, 'latitude').replace(',', '.'))
+                lon = float(cel(row, 'longitude').replace(',', '.'))
+            except Exception:
+                continue
+            if abs(lat) < 0.01 or abs(lon) < 0.01:
+                continue
+            out.append({'nome': cel(row, 'nome'), 'municipio': cel(row, 'municipio'),
+                        'uf': cel(row, 'uf'), 'tipo': _n(cel(row, 'tipo')), 'lat': lat, 'lon': lon})
+        with open(os.path.join(DOCS, 'filiais.json'), 'w', encoding='utf-8') as f:
+            json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
+        return len(out)
+    except Exception as e:
+        print('  filiais.json erro: %s' % repr(e)[:80])
+        return 0
+
+
 def main():
     os.makedirs(DOCS, exist_ok=True)
     open(os.path.join(DOCS, '.nojekyll'), 'w').close()
@@ -761,6 +822,9 @@ def main():
         json.dump(todos, f, ensure_ascii=False, separators=(',', ':'))
     com_geo = sum(1 for r in todos if 'lat' in r)
     print('Historico: %d editais (%d novos hoje) | %d com coordenada p/ mapa' % (len(todos), add, com_geo))
+
+    nf = gerar_filiais_json()
+    print('Filiais no mapa: %s' % ('%d (site deve estar protegido!)' % nf if nf else 'OFF (trava de privacidade)'))
 
     novos_hoje = sum(1 for r in todos if r.get('capturado_em') == hoje)
     html = gerar_html(len(todos), novos_hoje, hoje)
