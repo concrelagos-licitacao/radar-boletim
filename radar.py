@@ -187,7 +187,7 @@ registros = []      # cada um: dict fonte/uf/municipio/orgao/objeto/data_sessao/
 PNCP_TRUNC = []     # UFs em que o PNCP truncou (integra=False) -> vira ALERTA
 
 # orcamento de tempo POR FONTE: nenhuma fonte (ex: PNCP fora do ar) monopoliza o tempo das outras
-PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '300'))     # 5 min
+PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '600'))     # 10 min (evita truncar = nao perder)
 LICITAR_BUDGET_S = float(os.environ.get('LICITAR_BUDGET_S', '300'))  # 5 min
 def _prazo(segundos):
     fim = time.monotonic() + segundos
@@ -215,7 +215,7 @@ def coleta_pncp():
         while pag <= tot and pag <= 80:
             if not ok_tempo(): break
             url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
-                   '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
+                   '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=100'
                    % (ini.strftime('%Y%m%d'), hoje.strftime('%Y%m%d'), uf, pag))
             j = pncp_get(url)
             if j is None: ok = False; break          # falhou de vez -> integra do UF quebrou
@@ -236,9 +236,9 @@ def coleta_pncp():
                 time.sleep(4); data = (pncp_get(url) or {}).get('data') or []
                 if not data: ok = False; break  # retry unico falhou = throttle/truncou
             if not data: break
-            pag += 1; time.sleep(1.0)
+            pag += 1; time.sleep(0.3)
         if not ok: PNCP_TRUNC.append(uf)
-        time.sleep(0.6)
+        time.sleep(0.3)
     return n
 
 # ---------- 2) Querido Diario ----------
