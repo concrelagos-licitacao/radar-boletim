@@ -219,6 +219,98 @@ def enriquecer_veredito(todos):
     return n
 
 
+# ---------- RESUMO DO EDITAL (IA le o PDF, como o ConLicitacao) ----------
+import base64
+_RES = {'t0': None, 'budget': float(os.environ.get('RESUMO_BUDGET_S', '240')),
+        'max': int(os.environ.get('RESUMO_MAX', '12')), 'feitos': 0}
+
+
+def _pncp_partes(numero):
+    """numeroControlePNCP 'CNPJ-1-SEQ/ANO' -> (cnpj, ano, seq)."""
+    try:
+        p = numero.split('-')
+        cnpj = re.sub(r'\D', '', p[0])
+        sa = p[-1].split('/')
+        seq = int(re.sub(r'\D', '', sa[0]))
+        ano = re.sub(r'\D', '', sa[1])
+        if len(cnpj) == 14 and ano and seq:
+            return cnpj, ano, seq
+    except Exception:
+        pass
+    return None
+
+
+def _baixar_pdf_edital(numero):
+    partes = _pncp_partes(numero)
+    if not partes:
+        return None
+    cnpj, ano, seq = partes
+    url = 'https://pncp.gov.br/api/pncp/v1/orgaos/%s/compras/%s/%s/arquivos' % (cnpj, ano, seq)
+    try:
+        arqs = requests.get(url, timeout=15, headers={'User-Agent': 'concrelagos/1.0'}).json()
+    except Exception:
+        return None
+    if not isinstance(arqs, list):
+        return None
+    arqs.sort(key=lambda a: (0 if 'edital' in (a.get('titulo', '') or '').lower() else 1))
+    for a in arqs[:3]:
+        uri = a.get('uri') or a.get('url')
+        if not uri:
+            continue
+        try:
+            pdf = requests.get(uri, timeout=25, headers={'User-Agent': 'concrelagos/1.0'})
+            ct = (pdf.headers.get('Content-Type') or '').lower()
+            if pdf.status_code == 200 and ('pdf' in ct or uri.lower().endswith('.pdf')) and len(pdf.content) < 18000000:
+                return pdf.content
+        except Exception:
+            continue
+    return None
+
+
+def _gemini_resumo_pdf(conteudo_pdf):
+    prompt = ('Voce le UM edital de licitacao publica (concreto/brita). Resuma em ate 6 linhas '
+              'FACTUAIS, so o que esta escrito: objeto/produto, quantidade, prazo de entrega, '
+              'principais documentos de habilitacao exigidos, valor estimado. NAO invente, NAO '
+              'de parecer juridico. Se nao encontrar um dado, omita. Comece direto pelo resumo.')
+    try:
+        b64 = base64.b64encode(conteudo_pdf).decode()
+        resp = requests.post(
+            GEMINI_URL, params={'key': GEMINI_KEY},
+            json={'contents': [{'parts': [{'text': prompt},
+                  {'inline_data': {'mime_type': 'application/pdf', 'data': b64}}]}],
+                  'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 400}},
+            timeout=60)
+        if resp.status_code != 200:
+            return ''
+        cand = (resp.json().get('candidates') or [{}])[0]
+        txt = (((cand.get('content') or {}).get('parts') or [{}])[0].get('text') or '').strip()
+        return txt if len(txt) > 30 else ''
+    except Exception:
+        return ''
+
+
+def enriquecer_resumo(todos):
+    """Resumo do PDF via IA. So editais PNCP sem RESUMO_IA, dentro do orcamento. Falha graciosa."""
+    if _GEM['off']:
+        return 0
+    _RES['t0'] = time.monotonic()
+    n = 0
+    for r in todos:
+        if (r.get('RESUMO_IA') or '').strip() or r.get('FONTE') != 'PNCP':
+            continue
+        if _RES['feitos'] >= _RES['max'] or (time.monotonic() - _RES['t0']) > _RES['budget']:
+            break
+        _RES['feitos'] += 1
+        pdf = _baixar_pdf_edital(r.get('NUMERO', ''))
+        if not pdf:
+            continue
+        res = _gemini_resumo_pdf(pdf)
+        if res:
+            r['RESUMO_IA'] = res
+            n += 1
+    return n
+
+
 def gerar_html(total, novos_hoje, hoje):
     atualizado = datetime.now(timezone(timedelta(hours=-3))).strftime('%d/%m/%Y %H:%M')
     return HTML_TEMPLATE.replace('{{ATUALIZADO}}', atualizado) \
@@ -359,6 +451,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .ehead .star,.ehead .act{color:#9aa1ab;margin-left:6px}.ehead .star.on{color:#fff}.ehead .alido.on{color:#7CFC9E}
   .selo{background:#DCFCE7;color:#15803D;border-radius:6px;padding:1px 6px;font-size:.58rem;font-weight:700;margin-left:5px;font-family:var(--disp)}
   .lidorow td{opacity:.55}.ecard.lido{opacity:.62}
+  .resumoia{background:#FFF7E6;border:1px solid #F0D9A8;border-left:4px solid var(--accent);border-radius:8px;padding:9px 12px;margin:8px 0}
+  .resumoia b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#A9781F;margin-bottom:4px;font-family:var(--disp)}
+  .resumoia .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -634,9 +729,10 @@ function destaque(){
   $('destaque').innerHTML=h||'<div style="color:#9CA3AF;font-size:.85rem">Sem editais nos filtros atuais.</div>';
 }
 
+function resumoHTML(r){var s=g(r,'RESUMO_IA');if(!s)return '';return '<div class="resumoia"><b>Resumo do edital · leitura automatica (IA) — pode conter erros, confira o edital</b><div class="rtxt">'+esc(s).replace(/\n/g,'<br>')+'</div></div>';}
 function linDet(r){
   var d=diasAte(r),v=valNum(r);
-  return '<div class="det-box"><div>'
+  return resumoHTML(r)+'<div class="det-box"><div>'
     +'<div class="dl">Objeto completo</div><div class="dv">'+esc(g(r,'OBJETO'))+'</div>'
     +'<div class="dl">Orgao</div><div class="dv">'+esc(g(r,'ORGAO'))+'</div></div><div>'
     +'<div class="dl">Valor estimado</div><div class="dv">'+fmtBRL(v)+'</div>'
@@ -709,6 +805,7 @@ function renderCards(){
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'
+      +resumoHTML(r)
       +'<div class="dd"><b>Objeto:</b> '+esc(g(r,'OBJETO'))+'</div>'
       +'<div class="dd"><b>Modalidade:</b> '+(esc(g(r,'MODALIDADE'))||'-')+' · <b>Nº:</b> '+(esc(g(r,'NUMERO'))||'-')+'</div>'
       +'<div class="dd"><b>Prazo:</b> '+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+' · <b>Publicado:</b> '+(esc(g(r,'PUBLICADO'))||'-')+'</div>'
@@ -890,9 +987,10 @@ def main():
     # Gemini (opcional, blindado): so reescreve o veredito se a key existir; falha graciosa
     if not _GEM['off']:
         ger = enriquecer_veredito(todos)
-        print('Gemini: %d vereditos gerados (sem key/erro -> site usa veredito por codigo)' % ger)
+        res = enriquecer_resumo(todos)
+        print('Gemini: %d vereditos + %d resumos de edital (PDF) gerados' % (ger, res))
     else:
-        print('Gemini desligado (sem GEMINI_API_KEY) -- veredito gerado por codigo no site.')
+        print('Gemini desligado (sem GEMINI_API_KEY) -- veredito por codigo, sem resumo de PDF.')
 
     with open(DADOS_JSON, 'w', encoding='utf-8') as f:
         json.dump(todos, f, ensure_ascii=False, separators=(',', ':'))
