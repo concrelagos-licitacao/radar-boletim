@@ -215,7 +215,7 @@ def coleta_pncp():
         while pag <= tot and pag <= 80:
             if not ok_tempo(): break
             url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
-                   '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=100'
+                   '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
                    % (ini.strftime('%Y%m%d'), hoje.strftime('%Y%m%d'), uf, pag))
             j = pncp_get(url)
             if j is None: ok = False; break          # falhou de vez -> integra do UF quebrou

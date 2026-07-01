@@ -137,7 +137,8 @@ GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash').strip()
 GEMINI_URL = ('https://generativelanguage.googleapis.com/v1beta/models/'
               '%s:generateContent' % GEMINI_MODEL)
 _GEM = {'off': not GEMINI_KEY, 'falhas': 0, 't0': None,
-        'budget': float(os.environ.get('GEMINI_BUDGET_S', '120'))}
+        'budget': float(os.environ.get('GEMINI_BUDGET_S', '300')),
+        'pausa': float(os.environ.get('GEMINI_PAUSA_S', '6'))}  # espacamento p/ nao bater o limite grativo (429)
 
 
 def _num(r, k):
@@ -183,16 +184,24 @@ def _gemini_frase(r):
               'NAO invente nada, NAO de opiniao juridica, NAO cite exigencias. Se faltar dado '
               'essencial, responda exatamente VAZIO.\nDados: ' + campos + '\nFrase:')
     try:
+        time.sleep(_GEM['pausa'])   # respeita o limite de requisicoes/min do nivel gratuito
         resp = requests.post(
             GEMINI_URL, params={'key': GEMINI_KEY},
             json={'contents': [{'parts': [{'text': prompt}]}],
                   'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 60}},
-            timeout=15)
+            timeout=20)
+        if resp.status_code == 429:
+            _GEM['falhas'] += 1
+            if not _GEM.get('diag'):
+                _GEM['diag'] = 1
+                print('  GEMINI 429: limite do nivel gratuito atingido -- veredito por codigo cobre; espacando chamadas')
+            time.sleep(15)
+            return ''
         if resp.status_code != 200:
             _GEM['falhas'] += 1
             if not _GEM.get('diag'):
                 _GEM['diag'] = 1
-                print('  GEMINI ERRO HTTP %d: %s' % (resp.status_code, (resp.text or '')[:220]))
+                print('  GEMINI ERRO HTTP %d' % resp.status_code)
             return ''
         cand = (resp.json().get('candidates') or [{}])[0]
         txt = (((cand.get('content') or {}).get('parts') or [{}])[0].get('text') or '').strip()
@@ -278,12 +287,16 @@ def _gemini_resumo_pdf(conteudo_pdf):
               'de parecer juridico. Se nao encontrar um dado, omita. Comece direto pelo resumo.')
     try:
         b64 = base64.b64encode(conteudo_pdf).decode()
+        time.sleep(_GEM['pausa'])
         resp = requests.post(
             GEMINI_URL, params={'key': GEMINI_KEY},
             json={'contents': [{'parts': [{'text': prompt},
                   {'inline_data': {'mime_type': 'application/pdf', 'data': b64}}]}],
                   'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 400}},
             timeout=60)
+        if resp.status_code == 429:
+            time.sleep(15)
+            return ''
         if resp.status_code != 200:
             return ''
         cand = (resp.json().get('candidates') or [{}])[0]
