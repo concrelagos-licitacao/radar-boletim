@@ -125,24 +125,58 @@ def _carregar_filiais(gc):
     print("    nome | municipio | uf | latitude | longitude | tipo")
     return []
 
-def _enriquecer(r, filiais):
-    mun, uf = r.get('municipio', ''), r.get('uf', '')
-    if not mun or not uf or not filiais: return r
-    coord = _geocode(mun, uf)
-    if not coord: return r
-    cands = [f for f in filiais if str(f.get('uf', '')).upper() == uf.upper()]
-    if not cands: return r
-    melhor_km, melhor_f = None, None
-    for f in cands:
+# REGRA DE ATENDIMENTO: concreto entregue por USINA (<=70 km), brita por PEDREIRA (<=300 km).
+RAIO_USINA_KM = float(os.environ.get('RAIO_USINA_KM', '70'))
+RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '300'))
+_KW_BRITA = ('brita', 'pedra britada', 'pedras britadas', 'pedrisco', 'po de pedra', 'bica corrida',
+             'agregado', 'rachao', 'racho', 'cascalho', 'seixo', 'pedregulho', 'bgs', 'pedra de mao')
+_KW_CONC = ('concreto', 'usinado', 'concretagem', 'fck', 'dosado', 'bombeado', 'betonado', 'central dosadora')
+
+
+def _material(obj):
+    o = _n(obj)
+    return any(k in o for k in _KW_CONC), any(k in o for k in _KW_BRITA)  # (concreto, brita)
+
+
+def _min_dist(coord, filiais, tipo):
+    melhor, mf = None, None
+    for f in filiais:
+        if tipo not in _n(f.get('tipo', '')):
+            continue
         try:
             km = _haversine_km(coord, (float(f['latitude']), float(f['longitude'])))
-        except Exception: continue
-        if melhor_km is None or km < melhor_km:
-            melhor_km, melhor_f = km, f
-    if melhor_f:
-        r['distancia_km'] = round(melhor_km, 1)
-        r['filial_proxima'] = '%s (%s/%s)' % (melhor_f.get('nome', ''), melhor_f.get('municipio', ''), uf)
-        r['tipo_atendimento'] = melhor_f.get('tipo', 'usina')
+        except Exception:
+            continue
+        if melhor is None or km < melhor:
+            melhor, mf = km, f
+    return melhor, mf
+
+
+def _enriquecer(r, filiais):
+    mun, uf = r.get('municipio', ''), r.get('uf', '')
+    if not mun or not uf or not filiais:
+        return r                                  # sem municipio/filiais -> nao da p/ validar raio, mantem
+    coord = _geocode(mun, uf)
+    if not coord:
+        return r                                  # sem geo (raro c/ base IBGE) -> mantem sem distancia
+    conc, brita = _material(r.get('objeto', ''))
+    if not conc and not brita:
+        conc = True                               # indefinido -> trata como concreto (raio mais restrito)
+    opcoes = []
+    if conc:
+        d, f = _min_dist(coord, filiais, 'usina')
+        if d is not None and d <= RAIO_USINA_KM:
+            opcoes.append((d, f, 'usina'))
+    if brita:
+        d, f = _min_dist(coord, filiais, 'pedreira')
+        if d is not None and d <= RAIO_PEDREIRA_KM:
+            opcoes.append((d, f, 'pedreira'))
+    if not opcoes:
+        return None                               # FORA do raio de atendimento -> some do boletim
+    d, f, tp = min(opcoes, key=lambda x: x[0])
+    r['distancia_km'] = round(d, 1)
+    r['filial_proxima'] = '%s (%s/%s)' % (f.get('nome', ''), f.get('municipio', ''), f.get('uf', uf))
+    r['tipo_atendimento'] = tp
     return r
 
 AGORA = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -336,11 +370,13 @@ if not prev:
 ws_saude.append_row([AGORA, len(final), json.dumps(raw), json.dumps(poruf),
                      c_pncp, c_lic, c_qd, ", ".join(PNCP_TRUNC), alerta_txt])
 
-# ---------- enriquece com distancia geo ----------
+# ---------- enriquece com distancia geo + REGRA DE RAIO (concreto<=70km usina, brita<=300km pedreira) ----------
 if filiais:
     uniq_mun = len(set((r.get('municipio',''), r.get('uf','')) for r in final if r.get('municipio')))
     print("Geocodificando %d municipios unicos..." % uniq_mun)
-    final = [_enriquecer(r, filiais) for r in final]
+    antes = len(final)
+    final = [x for x in (_enriquecer(r, filiais) for r in final) if x is not None]
+    print("Regra de raio: %d dentro do raio de atendimento (%d removidos fora)" % (len(final), antes - len(final)))
 
 # ---------- grava o BOLETIM (mesma estrutura do ConLic) ----------
 final.sort(key=lambda r: (r.get('data_sessao') or '9999', r['uf']))
