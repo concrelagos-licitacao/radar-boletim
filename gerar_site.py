@@ -133,8 +133,9 @@ def merge_historico(novos, hoje):
 # ---------- Gemini BLINDADO (opcional): so reescreve numeros, nunca le edital ----------
 # Falha graciosa total: sem GEMINI_API_KEY -> nao mexe em nada (site usa veredito client-side).
 GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash').strip()
 GEMINI_URL = ('https://generativelanguage.googleapis.com/v1beta/models/'
-              'gemini-2.0-flash:generateContent')
+              '%s:generateContent' % GEMINI_MODEL)
 _GEM = {'off': not GEMINI_KEY, 'falhas': 0, 't0': None,
         'budget': float(os.environ.get('GEMINI_BUDGET_S', '120'))}
 
@@ -189,6 +190,9 @@ def _gemini_frase(r):
             timeout=15)
         if resp.status_code != 200:
             _GEM['falhas'] += 1
+            if not _GEM.get('diag'):
+                _GEM['diag'] = 1
+                print('  GEMINI ERRO HTTP %d: %s' % (resp.status_code, (resp.text or '')[:220]))
             return ''
         cand = (resp.json().get('candidates') or [{}])[0]
         txt = (((cand.get('content') or {}).get('parts') or [{}])[0].get('text') or '').strip()
