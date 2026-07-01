@@ -2,6 +2,7 @@ name: Boletim Licitacoes
 
 on:
   schedule:
+    - cron: '0 7 * * *'    # 04:00 BRT (UTC-3) -- madrugada, PNCP mais leve (consulta responde melhor)
     - cron: '0 10 * * *'   # 07:00 BRT (UTC-3) todos os dias
     - cron: '0 16 * * *'   # 13:00 BRT (UTC-3) -- 3a coleta, mais chance de pegar o PNCP no ar
     - cron: '0 20 * * *'   # 17:00 BRT (UTC-3) todos os dias
