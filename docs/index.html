@@ -149,7 +149,7 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S &nbsp;<span style="font-family:var(--body);font-weight:600;font-size:.82rem;color:#C9CEd6;letter-spacing:0">· Radar de Licitacoes</span></div>
         <div class="s">Concreto e brita - PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>01/07/2026 08:45</b></div>
+      <div class="updated">Ultima varredura<br><b>01/07/2026 08:56</b></div>
     </div>
 
     <div id="erro"></div>
@@ -162,8 +162,8 @@
 
     <div class="sec on" id="s-geral">
       <div class="cards">
-        <div class="card"><div class="lbl">No historico</div><div class="val">36</div><div class="sub">editais acumulados</div></div>
-        <div class="card"><div class="lbl">Novos hoje</div><div class="val">0</div><div class="sub">ultima coleta</div></div>
+        <div class="card"><div class="lbl">No historico</div><div class="val">1</div><div class="sub">editais acumulados</div></div>
+        <div class="card"><div class="lbl">Novos hoje</div><div class="val">1</div><div class="sub">ultima coleta</div></div>
         <div class="card"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">de uma unidade</div></div>
         <div class="card"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">editais marcados (★)</div></div>
       </div>
@@ -228,7 +228,7 @@
     <div class="sec" id="s-mapa">
       <div class="panel">
         <div class="clhead"><span class="ht">Mapa de oportunidades</span><span class="hs">cada ponto e um edital (municipio publico)</span></div>
-        <div class="maplegend">Cor pela distancia da unidade: <span class="km v">ate 50</span> <span class="km a">51-150</span> <span class="km c">+150 km</span>. As unidades da Concrelagos nao aparecem.</div>
+        <div class="maplegend">Editais por distancia: <span class="km v">ate 50</span> <span class="km a">51-150</span> <span class="km c">+150 km</span><span id="leg-fil" style="display:none"> &nbsp;|&nbsp; Unidades: <span class="km" style="background:#1E40AF">usina</span> <span class="km" style="background:#166534">pedreira</span></span></div>
         <div id="mapa"></div>
       </div>
     </div>
@@ -458,9 +458,28 @@ function graficos(){
   CH.km=new Chart($('cKm'),{type:'bar',data:{labels:Object.keys(fa),datasets:[{data:Object.values(fa),backgroundColor:['#2E7D32','#E08A00','#C2410C','#757575','#C9CDD3'],borderRadius:4}]},options:opt(false)});
 }
 
+var LFIL=null,FILADD=false;
+function filiaisMapa(){
+  if(FILADD||typeof L==='undefined'||!MAP)return;
+  FILADD=true;
+  fetch('filiais.json?v='+Date.now()).then(function(r){return r.ok?r.json():[];}).then(function(fs){
+    if(!fs||!fs.length)return;
+    LFIL=L.layerGroup();
+    fs.forEach(function(f){
+      if(typeof f.lat!=='number'||typeof f.lon!=='number')return;
+      var ped=(f.tipo||'').indexOf('pedreira')>=0,cor=ped?'#166534':'#1E40AF';
+      var m=L.circleMarker([f.lat,f.lon],{radius:8,color:'#fff',weight:2,fillColor:cor,fillOpacity:1});
+      m.bindPopup('<b>'+esc(f.nome||(ped?'Pedreira':'Usina'))+'</b><br><small>'+esc(f.municipio||'')+'/'+esc(f.uf||'')+' · '+(ped?'pedreira':'usina')+'</small>');
+      LFIL.addLayer(m);
+    });
+    LFIL.addTo(MAP);
+    document.getElementById('leg-fil').style.display='inline';
+  }).catch(function(){});
+}
 function mapa(){
   if(typeof L==='undefined')return;
   if(!MAP){MAP=L.map('mapa').setView([-19.9,-44.0],6);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap'}).addTo(MAP);}
+  filiaisMapa();
   if(LCAM){MAP.removeLayer(LCAM);}
   LCAM=L.layerGroup();var pts=[];
   VIS.forEach(function(r){
