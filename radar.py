@@ -125,9 +125,9 @@ def _carregar_filiais(gc):
     print("    nome | municipio | uf | latitude | longitude | tipo")
     return []
 
-# REGRA DE ATENDIMENTO: concreto entregue por USINA (<=70 km), brita por PEDREIRA (<=300 km).
+# REGRA DE ATENDIMENTO: concreto entregue por USINA (<=70 km), brita por PEDREIRA (<=500 km).
 RAIO_USINA_KM = float(os.environ.get('RAIO_USINA_KM', '70'))
-RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '300'))
+RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '500'))
 _KW_BRITA = ('brita', 'pedra britada', 'pedras britadas', 'pedrisco', 'po de pedra', 'bica corrida',
              'agregado', 'rachao', 'racho', 'cascalho', 'seixo', 'pedregulho', 'bgs', 'pedra de mao')
 _KW_CONC = ('concreto', 'usinado', 'concretagem', 'fck', 'dosado', 'bombeado', 'betonado', 'central dosadora')
