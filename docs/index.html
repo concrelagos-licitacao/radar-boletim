@@ -130,6 +130,9 @@
   .ehead .star,.ehead .act{color:#9aa1ab;margin-left:6px}.ehead .star.on{color:#fff}.ehead .alido.on{color:#7CFC9E}
   .selo{background:#DCFCE7;color:#15803D;border-radius:6px;padding:1px 6px;font-size:.58rem;font-weight:700;margin-left:5px;font-family:var(--disp)}
   .lidorow td{opacity:.55}.ecard.lido{opacity:.62}
+  .resumoia{background:#FFF7E6;border:1px solid #F0D9A8;border-left:4px solid var(--accent);border-radius:8px;padding:9px 12px;margin:8px 0}
+  .resumoia b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#A9781F;margin-bottom:4px;font-family:var(--disp)}
+  .resumoia .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -162,7 +165,7 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S &nbsp;<span style="font-family:var(--body);font-weight:600;font-size:.82rem;color:#C9CEd6;letter-spacing:0">· Radar de Licitacoes</span></div>
         <div class="s">Concreto e brita - PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>01/07/2026 09:47</b></div>
+      <div class="updated">Ultima varredura<br><b>01/07/2026 09:56</b></div>
     </div>
 
     <div id="erro"></div>
@@ -405,9 +408,10 @@ function destaque(){
   $('destaque').innerHTML=h||'<div style="color:#9CA3AF;font-size:.85rem">Sem editais nos filtros atuais.</div>';
 }
 
+function resumoHTML(r){var s=g(r,'RESUMO_IA');if(!s)return '';return '<div class="resumoia"><b>Resumo do edital · leitura automatica (IA) — pode conter erros, confira o edital</b><div class="rtxt">'+esc(s).replace(/\n/g,'<br>')+'</div></div>';}
 function linDet(r){
   var d=diasAte(r),v=valNum(r);
-  return '<div class="det-box"><div>'
+  return resumoHTML(r)+'<div class="det-box"><div>'
     +'<div class="dl">Objeto completo</div><div class="dv">'+esc(g(r,'OBJETO'))+'</div>'
     +'<div class="dl">Orgao</div><div class="dv">'+esc(g(r,'ORGAO'))+'</div></div><div>'
     +'<div class="dl">Valor estimado</div><div class="dv">'+fmtBRL(v)+'</div>'
@@ -480,6 +484,7 @@ function renderCards(){
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'
+      +resumoHTML(r)
       +'<div class="dd"><b>Objeto:</b> '+esc(g(r,'OBJETO'))+'</div>'
       +'<div class="dd"><b>Modalidade:</b> '+(esc(g(r,'MODALIDADE'))||'-')+' · <b>Nº:</b> '+(esc(g(r,'NUMERO'))||'-')+'</div>'
       +'<div class="dd"><b>Prazo:</b> '+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+' · <b>Publicado:</b> '+(esc(g(r,'PUBLICADO'))||'-')+'</div>'
