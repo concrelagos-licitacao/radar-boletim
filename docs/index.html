@@ -162,18 +162,21 @@
     <h2 class="srx" style="position:absolute;width:1px;height:1px;overflow:hidden">Radar de licitacoes Concrelagos: visao geral, editais e mapa.</h2>
     <div class="hbar">
       <div>
-        <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S &nbsp;<span style="font-family:var(--body);font-weight:600;font-size:.82rem;color:#C9CEd6;letter-spacing:0">· Radar de Licitacoes</span></div>
-        <div class="s">Concreto e brita - PNCP, Diario Oficial e Licitar Digital</div>
+        <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
+        <div class="s">Rastreador de licitacoes publicas - concreto &amp; brita - PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>01/07/2026 10:10</b></div>
+      <div class="updated">Ultima varredura<br><b>01/07/2026 13:21</b></div>
     </div>
 
     <div id="erro"></div>
 
     <div class="tabbar">
-      <button class="tabbtn on" data-t="geral">Visao Geral</button>
+      <button class="tabbtn on" data-t="geral">Dashboard</button>
       <button class="tabbtn" data-t="editais">Boletim</button>
       <button class="tabbtn" data-t="mapa">Mapa</button>
+      <button class="tabbtn" data-t="hist">Historico</button>
+      <button class="tabbtn" data-t="analise">Analise</button>
+      <button class="tabbtn" data-t="diario">Diario</button>
     </div>
 
     <div class="sec on" id="s-geral">
@@ -256,7 +259,35 @@
       </div>
     </div>
 
-    <div class="foot">Concrelagos - Equipe Juridica - dados publicos (PNCP / Diario Oficial) - atualizado todo dia as 7h e 17h</div>
+    <div class="sec" id="s-hist">
+      <div class="panel">
+        <div class="clhead"><span class="ht">Historico</span><span class="hs">todos os editais ja captados, acumulados</span></div>
+        <div class="filtros">
+          <div class="fcol" style="flex:1"><label>Buscar</label><input id="hbusca" placeholder="objeto, orgao, municipio, UF..."></div>
+          <div class="fcol"><label>Mes da sessao</label><select id="hmes"><option value="">Todos</option></select></div>
+        </div>
+        <div class="count" id="hcount"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Captado</th><th>Sessao</th><th>UF</th><th>Municipio</th><th>Orgao</th><th>Objeto</th><th>Fonte</th><th>Edital</th></tr></thead>
+          <tbody id="histbody"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="sec" id="s-analise">
+      <div class="panel">
+        <div class="clhead"><span class="ht">Analise dos editais</span><span class="hs">resumo por IA · leitura automatica, pode conter erros — confira o edital</span></div>
+        <div id="analiselist"></div>
+      </div>
+    </div>
+
+    <div class="sec" id="s-diario">
+      <div class="panel">
+        <div class="clhead"><span class="ht">Diario de execucao</span><span class="hs">auditoria das coletas do radar (quando rodou, quantos, se o PNCP truncou)</span></div>
+        <div id="diariolist"></div>
+      </div>
+    </div>
+
+    <div class="foot">Concrelagos - Equipe Juridica - dados publicos (PNCP / Diario Oficial) - atualizado 4x/dia (4h, 7h, 13h, 17h)</div>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -573,12 +604,49 @@ function exportarCSV(){
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='radar_concrelagos.csv';a.click();
 }
 
+function popularMes(){var ms={};DADOS.forEach(function(r){var p=g(r,'DATA SESSAO').split('/');if(p.length===3)ms[p[2]+'-'+p[1]]=1;});Object.keys(ms).sort().reverse().forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m.split('-')[1]+'/'+m.split('-')[0];$('hmes').appendChild(o);});}
+function renderHist(){
+  var q=($('hbusca').value||'').toLowerCase().trim(),mes=$('hmes').value;
+  var rows=DADOS.filter(function(r){
+    if(mes){var p=g(r,'DATA SESSAO').split('/');if(p.length!==3||(p[2]+'-'+p[1])!==mes)return false;}
+    if(q){var b=(g(r,'OBJETO')+' '+g(r,'ORGAO')+' '+g(r,'MUNICIPIO')+' '+g(r,'UF')).toLowerCase();if(b.indexOf(q)<0)return false;}
+    return true;
+  });
+  rows.sort(function(a,b){return g(b,'capturado_em').localeCompare(g(a,'capturado_em'));});
+  $('hcount').textContent=rows.length+' editais no historico'+(mes?' em '+mes:'');
+  var h='';rows.slice(0,600).forEach(function(r){
+    var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener">Abrir</a>':'-';
+    h+='<tr><td style="white-space:nowrap">'+esc(g(r,'capturado_em'))+'</td><td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+'</td><td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td><td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,90)+'</td><td>'+esc(g(r,'FONTE'))+'</td><td>'+bt+'</td></tr>';
+  });
+  $('histbody').innerHTML=h||'<tr><td colspan="8" style="padding:20px;text-align:center;color:#9CA3AF">Sem editais.</td></tr>';
+}
+function renderAnalise(){
+  var com=DADOS.filter(function(r){return g(r,'RESUMO_IA');});
+  if(!com.length){$('analiselist').innerHTML='<div style="color:#9CA3AF;font-size:.88rem;padding:14px;line-height:1.6">Nenhum resumo de IA gerado ainda.<br>Os resumos aparecem aqui quando o robo le o PDF do edital (editais do PNCP), com a chave Gemini dentro da cota gratuita. O veredito curto (Leitura automatica) continua em cada edital no Boletim.</div>';return;}
+  var h='';com.forEach(function(r){
+    h+='<div class="ecard" style="margin-bottom:12px"><div class="ehead"><span class="enum">'+esc(g(r,'UF'))+'</span><span class="ebadges" style="color:#fff">'+esc(g(r,'MUNICIPIO'))+' · '+esc(g(r,'DATA SESSAO'))+'</span></div><div class="ebody"><div class="eobj">'+esc(g(r,'OBJETO')).slice(0,180)+'</div>'+resumoHTML(r)+(g(r,'LINK').indexOf('http')===0?'<a class="abrir" href="'+esc(g(r,'LINK'))+'" target="_blank" rel="noopener">Abrir edital</a>':'')+'</div></div>';
+  });
+  $('analiselist').innerHTML=h;
+}
+function renderDiario(){
+  fetch('diario.json?v='+Date.now()).then(function(r){return r.ok?r.json():[];}).then(function(ex){
+    if(!ex||!ex.length){$('diariolist').innerHTML='<div style="color:#9CA3AF;padding:14px">Sem registro de execucoes ainda.</div>';return;}
+    var h='<div class="tbl-wrap"><table><thead><tr><th>Quando</th><th>Total</th><th>PNCP</th><th>Licitar</th><th>Diario Of.</th><th>Situacao</th></tr></thead><tbody>';
+    ex.forEach(function(e){var al=String(e.alerta||''),ruim=/ALERTA|TRUNC|DESPENC|0/.test(al);h+='<tr><td style="white-space:nowrap">'+esc(e.quando)+'</td><td><b>'+esc(e.total)+'</b></td><td>'+esc(e.pncp)+'</td><td>'+esc(e.licitar)+'</td><td>'+esc(e.qd)+'</td><td style="font-size:.72rem;color:'+(ruim?'#C0392B':'#16A34A')+'">'+esc(al.slice(0,80))+'</td></tr>';});
+    h+='</tbody></table></div>';$('diariolist').innerHTML=h;
+  }).catch(function(){$('diariolist').innerHTML='<div style="color:#9CA3AF;padding:14px">Diario indisponivel.</div>';});
+}
 document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('click',function(){
   document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.remove('on');});
   document.querySelectorAll('.sec').forEach(function(x){x.classList.remove('on');});
   b.classList.add('on');$('s-'+b.getAttribute('data-t')).classList.add('on');
-  if(b.getAttribute('data-t')==='mapa')setTimeout(mapa,60);
+  var t=b.getAttribute('data-t');
+  if(t==='mapa')setTimeout(mapa,60);
+  else if(t==='hist')renderHist();
+  else if(t==='analise')renderAnalise();
+  else if(t==='diario')renderDiario();
 });});
+$('hbusca').addEventListener('input',renderHist);$('hmes').addEventListener('change',renderHist);
 ['busca','fuf','ffonte','fmod','fsit','fvalor','fkm'].forEach(function(i){$(i).addEventListener('input',aplicar);$(i).addEventListener('change',aplicar);});
 document.querySelectorAll('thead th[data-c]').forEach(function(th){th.addEventListener('click',function(){var c=th.getAttribute('data-c');if(ordCol===c)ordDir*=-1;else{ordCol=c;ordDir=(c==='km'?1:-1);}pg=0;ordenar();render();});});
 $('mTab').addEventListener('click',function(){modo='tab';$('mTab').classList.add('on');$('mCard').classList.remove('on');pg=0;render();});
@@ -601,7 +669,7 @@ $('bcsv').addEventListener('click',exportarCSV);
 $('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;SEL={};$('stLic').classList.add('on');$('stAcc').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='score';ordDir=-1;if($('fordem'))$('fordem').value='score';aplicar();});
 
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();
+  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();
 }).catch(function(){
   $('load').style.display='none';$('app').style.display='block';
   $('erro').innerHTML='<div style="background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px;border-radius:10px;margin:16px 0">Nao foi possivel carregar os dados. Recarregue a pagina.</div>';
