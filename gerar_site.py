@@ -304,6 +304,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .seg{display:inline-flex;border:1px solid #CDD2D8;border-radius:10px;overflow:hidden}
   .seg button{border:0;background:#fff;color:var(--primary);padding:8px 13px;font-size:.78rem;cursor:pointer;font-family:var(--disp);letter-spacing:.02em}
   .seg button.on{background:var(--ggold);color:#fff}
+  .subtabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--border)}
+  .subtab{border:0;background:transparent;color:var(--muted);padding:9px 18px;font-family:var(--disp);font-size:.76rem;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:color .15s}
+  .subtab:hover{color:var(--primary)}
+  .subtab.on{color:var(--accent-d);border-bottom-color:var(--accent)}
+  .subtab .cnt{background:var(--primary);color:#fff;border-radius:9px;padding:1px 7px;font-size:.66rem;margin-left:4px}
+  .subtab.on .cnt{background:var(--accent)}
+  .card.kclic{cursor:pointer}.card.kclic:active{transform:scale(.99)}
+  .diahead{background:linear-gradient(90deg,#3A4149,#1E3A5F);color:#fff;font-family:var(--disp);font-size:.72rem;letter-spacing:.02em;padding:7px 13px;border-radius:8px;margin:12px 0 6px;display:flex;justify-content:space-between;align-items:center}
+  .diahead button{background:rgba(255,255,255,.16);border:0;color:#fff;border-radius:6px;padding:3px 10px;font-size:.66rem;cursor:pointer;font-family:var(--body)}
+  .diahead button:hover{background:rgba(255,255,255,.28)}
+  .selc{cursor:pointer;width:15px;height:15px;vertical-align:middle;accent-color:var(--accent)}
+  tr.selrow td,.ecard.selc-on{outline:2px solid var(--accent);outline-offset:-2px}
+  @media print{.tabbar,.subtabs,.filtros,.pag,.hbar,.graficos,.destaque,#s-mapa,.foot,.acts,.eactions,.abrir{display:none!important}.sec{display:block!important}body{background:#fff}.ecards{grid-template-columns:1fr 1fr}}
   .count{color:var(--muted);font-size:.82rem;margin:4px 2px 10px}
   /* tabela */
   .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
@@ -392,9 +405,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="sec on" id="s-geral">
       <div class="cards">
         <div class="card"><div class="lbl">No historico</div><div class="val">{{TOTAL}}</div><div class="sub">editais acumulados</div></div>
-        <div class="card"><div class="lbl">Novos hoje</div><div class="val">{{NOVOS}}</div><div class="sub">ultima coleta</div></div>
-        <div class="card"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">de uma unidade</div></div>
-        <div class="card"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">editais marcados (★)</div></div>
+        <div class="card kclic" data-kpi="hoje"><div class="lbl">Novos hoje</div><div class="val">{{NOVOS}}</div><div class="sub">ver no boletim →</div></div>
+        <div class="card kclic" data-kpi="prox"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">ordenar por distancia →</div></div>
+        <div class="card kclic" data-kpi="fav"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">ver acompanhados →</div></div>
       </div>
       <div class="graficos">
         <div class="gbox"><h4>Editais por estado (UF)</h4><div class="gwrap"><canvas id="cUf"></canvas></div></div>
@@ -410,6 +423,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="sec" id="s-editais">
       <div class="panel">
         <div class="clhead"><span class="ht">Boletim de Licitacoes</span><span class="hs">concreto usinado &amp; brita · pregao eletronico</span></div>
+        <div class="subtabs">
+          <button class="subtab on" id="stLic">Licitacoes <span class="cnt" id="cLic">0</span></button>
+          <button class="subtab" id="stAcc">Acompanhamentos <span class="cnt" id="cAcc">0</span></button>
+        </div>
         <div class="filtros">
           <div class="fcol" style="flex:1"><label>Buscar (objeto, orgao, municipio, numero)</label><input id="busca" placeholder="Ex.: concreto usinado, brita, prefeitura..."></div>
           <div class="fcol"><label>UF</label><select id="fuf"><option value="">Todas</option></select></div>
@@ -417,15 +434,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="fcol"><label>Modalidade</label><select id="fmod"><option value="">Todas</option></select></div>
           <div class="fcol"><label>Situacao</label><select id="fsit"><option value="">Todas</option><option value="ab">Abertas (sessao futura)</option><option value="en">Encerradas</option></select></div>
           <div class="fcol"><label>Valor minimo (R$)</label><input id="fvalor" type="number" min="0" step="10000" placeholder="0"></div>
+          <div class="fcol"><label>Ordenar por</label><select id="fordem"><option value="score">Melhor oportunidade</option><option value="data">Sessao mais proxima</option><option value="valor">Maior valor</option><option value="km">Menor distancia</option></select></div>
           <div class="fcol"><label>Distancia max: <span class="rangeval" id="kmval">qualquer</span></label><input type="range" id="fkm" min="0" max="1000" step="25" value="1000"></div>
         </div>
         <div class="filtros">
           <div class="fcol"><label>Exibir</label><div class="seg"><button id="mTab" class="on">▤ Tabela</button><button id="mCard">▦ Cards</button></div></div>
-          <div class="fcol"><label>&nbsp;</label><button class="btn g" id="bprox">Melhores oportunidades</button></div>
-          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bfav">★ So acompanhados</button></div>
+          <div class="fcol"><label>Selecao</label><div class="seg"><button id="selPag">☑ Pagina</button><button id="selNone">limpar</button></div></div>
+          <div class="fcol"><label>Marcar selecionados</label><div class="seg"><button id="selLido">✓ lido</button><button id="selFav">★ fav</button><button id="selDesc">✗ descartar</button></div></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="bocultar">Ocultar lidos</button></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="bdesc">Ver descartados</button></div>
-          <div class="fcol"><label>&nbsp;</label><button class="btn" id="bcsv">Exportar CSV</button></div>
+          <div class="fcol"><label>Exportar</label><div class="seg"><button id="bcsv">CSV</button><button id="bxlsx">xlsx</button><button id="bpdf">PDF</button></div></div>
+          <div class="fcol"><label>&nbsp;</label><button class="btn" id="blink">Copiar link</button></div>
           <div class="fcol"><label>&nbsp;</label><button class="btn" id="blimpar">Limpar</button></div>
         </div>
         <div class="count" id="count"></div>
@@ -433,7 +452,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="tbl-wrap">
             <table>
               <thead><tr>
-                <th class="nos">★</th>
+                <th class="nos" style="width:22px"></th>
+                <th class="nos">★ ✓ ✗</th>
                 <th data-c="score">Score<span class="ar"></span></th>
                 <th data-c="data">Sessao<span class="ar"></span></th>
                 <th data-c="uf">UF<span class="ar"></span></th>
@@ -467,8 +487,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-var DADOS=[],VIS=[],HOJE="{{HOJE}}",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab";
+var DADOS=[],VIS=[],HOJE="{{HOJE}}",ordCol="score",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab",SEL={};
 function _ls(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
 var FAV=_ls('cl_fav'),LIDO=_ls('cl_lido'),DESC=_ls('cl_descartado');
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -562,8 +583,44 @@ function kpis(){
   var kms=VIS.map(kmNum).filter(function(x){return x!=null;});
   if(kms.length){$('kMin').textContent=Math.round(Math.min.apply(null,kms))+' km';$('kMinL').textContent='unidade mais perto (filtros)';}
   else{$('kMin').textContent='-';$('kMinL').textContent='sem distancia calculada';}
-  $('kFav').textContent=DADOS.filter(isFav).length;
+  var nfav=DADOS.filter(isFav).length;
+  $('kFav').textContent=nfav;
+  if($('cLic'))$('cLic').textContent=VIS.length;
+  if($('cAcc'))$('cAcc').textContent=nfav;
 }
+
+// ---- selecao em massa (por favKey) ----
+function isSel(r){return !!SEL[favKey(r)];}
+function toggleSel(r){var k=favKey(r);if(SEL[k])delete SEL[k];else SEL[k]=r;}
+function selPagina(){var ini=pg*PP;VIS.slice(ini,ini+PP).forEach(function(r){SEL[favKey(r)]=r;});render();}
+function selLimpar(){SEL={};render();}
+function marcarSel(tipo){
+  var rs=Object.keys(SEL).map(function(k){return SEL[k];});
+  rs.forEach(function(r){if(tipo==='lido'&&!isLido(r))toggleLido(r);if(tipo==='fav'&&!isFav(r))toggleFav(r);if(tipo==='desc'&&!isDesc(r))toggleDesc(r);});
+  SEL={};kpis();aplicar();
+}
+function chkHTML(gi,r){return '<input type="checkbox" class="selc" data-s="'+gi+'"'+(isSel(r)?' checked':'')+' onclick="event.stopPropagation()">';}
+function bindSel(sel){document.querySelectorAll(sel+' .selc').forEach(function(c){c.addEventListener('change',function(ev){ev.stopPropagation();toggleSel(VIS[+c.getAttribute('data-s')]);});});}
+
+// ---- ordenar por / subtabs / kpis clicaveis ----
+function setOrdem(v){ordCol=v;ordDir=(v==='km'||v==='data')?(v==='km'?1:-1):-1;if(v==='data')ordDir=-1;pg=0;ordenar();render();}
+function irBoletim(){document.querySelector('.tabbtn[data-t=editais]').click();}
+
+// ---- link compartilhavel ----
+function filtrosURL(){var p=new URLSearchParams();['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){if($(i).value)p.set(i,$(i).value);});if($('fkm').value!=1000)p.set('fkm',$('fkm').value);if(soFav)p.set('fav','1');p.set('ord',ordCol);return p.toString();}
+function copiarLink(){var u=location.origin+location.pathname+'?'+filtrosURL();(navigator.clipboard&&navigator.clipboard.writeText(u).then(function(){toast('Link copiado!');},function(){prompt('Copie o link:',u);}))||prompt('Copie o link:',u);}
+function lerURL(){var p=new URLSearchParams(location.search);['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){if(p.get(i)&&$(i))$(i).value=p.get(i);});if(p.get('fkm'))$('fkm').value=p.get('fkm');if(p.get('fav')==='1')soFav=true;if(p.get('ord')){ordCol=p.get('ord');if($('fordem'))$('fordem').value=ordCol;}}
+function toast(m){var t=document.createElement('div');t.textContent=m;t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2E7D32;color:#fff;padding:10px 20px;border-radius:10px;z-index:99;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.2)';document.body.appendChild(t);setTimeout(function(){t.remove();},1800);}
+
+// ---- exportar xlsx / pdf ----
+function exportXlsx(){
+  if(typeof XLSX==='undefined'){toast('Exportador carregando, tente de novo');return;}
+  var cols=['DATA SESSAO','UF','MUNICIPIO','ORGAO','OBJETO','FONTE','VALOR','MODALIDADE','DISTANCIA KM','NUMERO','LINK'];
+  var aoa=[['SCORE','PRIORIDADE','VEREDITO'].concat(cols)];
+  VIS.forEach(function(r){var s=score(r);aoa.push([s,priTxt(s),veredito(r)].concat(cols.map(function(c){return g(r,c);})));});
+  var ws=XLSX.utils.aoa_to_sheet(aoa),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Radar');XLSX.writeFile(wb,'radar_concrelagos.xlsx');
+}
+function exportPdf(){window.print();}
 
 function destaque(){
   var top=VIS.slice().sort(function(a,b){return score(b)-score(a);}).slice(0,6),h='';
@@ -597,15 +654,21 @@ function render(){
   paginacao();
 }
 
+function naoLidasDia(dia){return VIS.filter(function(x){return g(x,'DATA SESSAO')===dia&&!isLido(x);}).length;}
+function marcarDia(dia){VIS.forEach(function(x){if(g(x,'DATA SESSAO')===dia&&!isLido(x))toggleLido(x);});kpis();ocultarLidos?aplicar():render();}
+function diaHead(dia,cols){var nl=naoLidasDia(dia);return '<div class="diahead"><span>'+esc(dia||'Sem data')+' · '+nl+' nao lida(s)</span>'+(nl?'<button data-dia="'+esc(dia)+'">marcar dia como lido</button>':'<span style="opacity:.75">tudo lido ✓</span>')+'</div>';}
+
 function renderTabela(){
-  var tb=$('tbody'),ini=pg*PP,page=VIS.slice(ini,ini+PP);
-  if(!VIS.length){tb.innerHTML='<tr><td colspan="11" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';return;}
+  var tb=$('tbody'),ini=pg*PP,page=VIS.slice(ini,ini+PP),agrupa=(ordCol==='data'),dAtual=null;
+  if(!VIS.length){tb.innerHTML='<tr><td colspan="12" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';return;}
   var h='';
   page.forEach(function(r,idx){
     var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>');
     var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir</a>':'-';
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
-    h+='<tr class="lin'+(isLido(r)?' lidorow':'')+'" data-i="'+gi+'">'
+    if(agrupa){var dia=g(r,'DATA SESSAO');if(dia!==dAtual){dAtual=dia;h+='<tr><td colspan="12" style="padding:0;border:0">'+diaHead(dia)+'</td></tr>';}}
+    h+='<tr class="lin'+(isLido(r)?' lidorow':'')+(isSel(r)?' selrow':'')+'" data-i="'+gi+'">'
+      +'<td>'+chkHTML(gi,r)+'</td>'
       +'<td class="acts">'+actHTML(gi,r)+'</td>'
       +'<td><span class="sc2" style="background:'+scCor(s)+'">'+s+'</span></td>'
       +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+(isLido(r)?'<span class="selo">LIDO</span>':'')+'</td>'
@@ -613,23 +676,25 @@ function renderTabela(){
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
       +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
       +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+'</td><td>'+bt+'</td></tr>';
-    if(abertos[gi])h+='<tr class="det"><td colspan="11">'+linDet(r)+'</td></tr>';
+    if(abertos[gi])h+='<tr class="det"><td colspan="12">'+linDet(r)+'</td></tr>';
   });
   tb.innerHTML=h;
   document.querySelectorAll('#tbody tr.lin').forEach(function(tr){tr.addEventListener('click',function(){var i=tr.getAttribute('data-i');abertos[i]=!abertos[i];render();});});
-  bindActions('#tbody');
+  document.querySelectorAll('#tbody .diahead button').forEach(function(b){b.addEventListener('click',function(){marcarDia(b.getAttribute('data-dia'));});});
+  bindActions('#tbody');bindSel('#tbody');
 }
 
 function renderCards(){
-  var box=$('ecards'),ini=pg*PP,page=VIS.slice(ini,ini+PP);
+  var box=$('ecards'),ini=pg*PP,page=VIS.slice(ini,ini+PP),agrupa=(ordCol==='data'),dAtual=null;
   if(!VIS.length){box.innerHTML='<div style="padding:24px;text-align:center;color:#9CA3AF;grid-column:1/-1">Nenhum edital com esses filtros.</div>';return;}
   var h='';
   page.forEach(function(r,idx){
     var gi=ini+idx,s=score(r),km=kmNum(r),d=diasAte(r),v=valNum(r);
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
-    h+='<div class="ecard'+(isLido(r)?' lido':'')+'"><div class="ehead">'
+    if(agrupa){var dia=g(r,'DATA SESSAO');if(dia!==dAtual){dAtual=dia;h+='<div style="grid-column:1/-1">'+diaHead(dia)+'</div>';}}
+    h+='<div class="ecard'+(isLido(r)?' lido':'')+(isSel(r)?' selc-on':'')+'"><div class="ehead">'
       +'<span class="enum">#'+('0'+(gi+1)).slice(-2)+'</span>'
-      +'<span class="ebadges">'+actHTML(gi,r)
+      +'<span class="ebadges">'+chkHTML(gi,r)+actHTML(gi,r)
       +(isLido(r)?'<span class="selo">LIDO</span>':'')
       +(urgT(r)?urgT(r):'')+'<span class="pri '+priCls(s)+'">'+priTxt(s)+'</span><span class="sc2" style="background:'+scCor(s)+'">SCORE '+s+'</span></span></div>'
       +'<div class="ebody">'
@@ -653,7 +718,8 @@ function renderCards(){
       +'</div></div>';
   });
   box.innerHTML=h;
-  bindActions('#ecards');
+  bindActions('#ecards');bindSel('#ecards');
+  document.querySelectorAll('#ecards .diahead button').forEach(function(b){b.addEventListener('click',function(){marcarDia(b.getAttribute('data-dia'));});});
 }
 
 function actHTML(gi,r){
@@ -741,15 +807,25 @@ document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('cli
 document.querySelectorAll('thead th[data-c]').forEach(function(th){th.addEventListener('click',function(){var c=th.getAttribute('data-c');if(ordCol===c)ordDir*=-1;else{ordCol=c;ordDir=(c==='km'?1:-1);}pg=0;ordenar();render();});});
 $('mTab').addEventListener('click',function(){modo='tab';$('mTab').classList.add('on');$('mCard').classList.remove('on');pg=0;render();});
 $('mCard').addEventListener('click',function(){modo='card';$('mCard').classList.add('on');$('mTab').classList.remove('on');pg=0;render();});
-$('bprox').addEventListener('click',function(){ordCol='score';ordDir=-1;pg=0;ordenar();render();document.querySelector('.tabbtn[data-t=editais]').click();});
-$('bfav').addEventListener('click',function(){soFav=!soFav;$('bfav').classList.toggle('on',soFav);aplicar();});
+$('fordem').addEventListener('change',function(){setOrdem($('fordem').value);});
+$('stLic').addEventListener('click',function(){soFav=false;$('stLic').classList.add('on');$('stAcc').classList.remove('on');aplicar();});
+$('stAcc').addEventListener('click',function(){soFav=true;$('stAcc').classList.add('on');$('stLic').classList.remove('on');aplicar();});
+document.querySelectorAll('.card.kclic').forEach(function(c){c.addEventListener('click',function(){var k=c.getAttribute('data-kpi');if(k==='prox'){ordCol='km';ordDir=1;if($('fordem'))$('fordem').value='km';}else if(k==='fav'){soFav=true;$('stAcc').classList.add('on');$('stLic').classList.remove('on');}pg=0;aplicar();irBoletim();});});
+$('selPag').addEventListener('click',selPagina);
+$('selNone').addEventListener('click',selLimpar);
+$('selLido').addEventListener('click',function(){marcarSel('lido');});
+$('selFav').addEventListener('click',function(){marcarSel('fav');});
+$('selDesc').addEventListener('click',function(){marcarSel('desc');});
+$('blink').addEventListener('click',copiarLink);
+$('bxlsx').addEventListener('click',exportXlsx);
+$('bpdf').addEventListener('click',exportPdf);
 $('bocultar').addEventListener('click',function(){ocultarLidos=!ocultarLidos;$('bocultar').classList.toggle('on',ocultarLidos);$('bocultar').textContent=ocultarLidos?'Mostrar lidos':'Ocultar lidos';aplicar();});
 $('bdesc').addEventListener('click',function(){verDesc=!verDesc;$('bdesc').classList.toggle('on',verDesc);$('bdesc').textContent=verDesc?'Voltar aos ativos':'Ver descartados';aplicar();});
 $('bcsv').addEventListener('click',exportarCSV);
-$('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;$('bfav').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='data';ordDir=-1;aplicar();});
+$('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;SEL={};$('stLic').classList.add('on');$('stAcc').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='score';ordDir=-1;if($('fordem'))$('fordem').value='score';aplicar();});
 
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();aplicar();
+  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();
 }).catch(function(){
   $('load').style.display='none';$('app').style.display='block';
   $('erro').innerHTML='<div style="background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px;border-radius:10px;margin:16px 0">Nao foi possivel carregar os dados. Recarregue a pagina.</div>';
