@@ -149,7 +149,7 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S &nbsp;<span style="font-family:var(--body);font-weight:600;font-size:.82rem;color:#C9CEd6;letter-spacing:0">· Radar de Licitacoes</span></div>
         <div class="s">Concreto e brita - PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>30/06/2026 20:59</b></div>
+      <div class="updated">Ultima varredura<br><b>01/07/2026 08:45</b></div>
     </div>
 
     <div id="erro"></div>
@@ -163,7 +163,7 @@
     <div class="sec on" id="s-geral">
       <div class="cards">
         <div class="card"><div class="lbl">No historico</div><div class="val">36</div><div class="sub">editais acumulados</div></div>
-        <div class="card"><div class="lbl">Novos hoje</div><div class="val">36</div><div class="sub">ultima coleta</div></div>
+        <div class="card"><div class="lbl">Novos hoje</div><div class="val">0</div><div class="sub">ultima coleta</div></div>
         <div class="card"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">de uma unidade</div></div>
         <div class="card"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">editais marcados (★)</div></div>
       </div>
@@ -239,7 +239,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-var DADOS=[],VIS=[],HOJE="2026-06-30",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab";
+var DADOS=[],VIS=[],HOJE="2026-07-01",ordCol="data",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab";
 function _ls(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
 var FAV=_ls('cl_fav'),LIDO=_ls('cl_lido'),DESC=_ls('cl_descartado');
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
