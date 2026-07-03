@@ -52,6 +52,14 @@
   .gbox{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--sh)}
   .gbox h4{font-size:.78rem;margin-bottom:10px}.gwrap{position:relative;height:200px}
   .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--sh)}
+  #s-hist .graficos{grid-template-columns:1fr 1fr}
+  .hgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;margin-bottom:16px}
+  .hrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:.82rem}
+  .hrow:last-child{border-bottom:0}
+  .hrow .nm{color:var(--primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hrow .mt{white-space:nowrap;color:var(--muted);font-size:.78rem}
+  .hrow .mt b{color:var(--accent-d);font-family:var(--disp);font-size:.8rem}
+  .dbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:.66rem;font-weight:700;color:#fff;font-family:var(--disp)}
   /* destaques */
   .destaque{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .dcard{border:1px solid var(--border);border-radius:11px;padding:13px 15px;border-left:4px solid var(--ok);background:#FAFBFC;transition:transform .22s var(--ease),box-shadow .22s}
@@ -165,7 +173,7 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
         <div class="s">Rastreador de licitacoes publicas - concreto &amp; brita - PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>02/07/2026 20:53</b></div>
+      <div class="updated">Ultima varredura<br><b>03/07/2026 09:08</b></div>
     </div>
 
     <div id="erro"></div>
@@ -260,8 +268,22 @@
     </div>
 
     <div class="sec" id="s-hist">
+      <div class="cards" id="hkpi">
+        <div class="card"><div class="lbl">Pregoes disputados</div><div class="val" id="kPreg">-</div><div class="sub">desde 2019</div></div>
+        <div class="card"><div class="lbl">Volume contratado</div><div class="val" id="kVol">-</div><div class="sub">m3 acumulados</div></div>
+        <div class="card"><div class="lbl">Valor contratado</div><div class="val" id="kVal">-</div><div class="sub">R$ historico</div></div>
+        <div class="card"><div class="lbl">Preco tipico</div><div class="val" id="kUnit">-</div><div class="sub" id="kUnitL">R$/m3 (mediana)</div></div>
+      </div>
+      <div class="graficos">
+        <div class="gbox"><h4>Preco vencedor por ano (R$/m3)</h4><div class="gwrap"><canvas id="cPreco"></canvas></div></div>
+        <div class="gbox"><h4>Volume contratado por ano (m3)</h4><div class="gwrap"><canvas id="cVol"></canvas></div></div>
+      </div>
+      <div class="hgrid">
+        <div class="panel"><div class="clhead"><span class="ht">Top clientes por volume</span><span class="hs">m3 contratados (historico)</span></div><div id="htop"></div></div>
+        <div class="panel"><div class="clhead"><span class="ht">Contratos a vencer (90 dias)</span><span class="hs">hora de buscar a proxima ata</span></div><div id="hvencer"></div></div>
+      </div>
       <div class="panel">
-        <div class="clhead"><span class="ht">Historico</span><span class="hs">todos os editais ja captados, acumulados</span></div>
+        <div class="clhead"><span class="ht">Arquivo de editais</span><span class="hs">todos os editais ja captados pelo radar, acumulados</span></div>
         <div class="filtros">
           <div class="fcol" style="flex:1"><label>Buscar</label><input id="hbusca" placeholder="objeto, orgao, municipio, UF..."></div>
           <div class="fcol"><label>Mes da sessao</label><select id="hmes"><option value="">Todos</option></select></div>
@@ -271,6 +293,7 @@
           <thead><tr><th>Captado</th><th>Sessao</th><th>UF</th><th>Municipio</th><th>Orgao</th><th>Objeto</th><th>Fonte</th><th>Edital</th></tr></thead>
           <tbody id="histbody"></tbody></table></div>
       </div>
+      <div class="foot" style="margin-top:6px">Precificacao a partir do historico de pregoes da Concrelagos — leitura automatica, confira sempre a fonte.</div>
     </div>
 
     <div class="sec" id="s-analise">
@@ -294,7 +317,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-var DADOS=[],VIS=[],HOJE="2026-07-02",ordCol="score",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab",SEL={};
+var DADOS=[],VIS=[],HOJE="2026-07-03",ordCol="score",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab",SEL={};
 function _ls(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
 var FAV=_ls('cl_fav'),LIDO=_ls('cl_lido'),DESC=_ls('cl_descartado');
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -605,7 +628,30 @@ function exportarCSV(){
 }
 
 function popularMes(){var ms={};DADOS.forEach(function(r){var p=g(r,'DATA SESSAO').split('/');if(p.length===3)ms[p[2]+'-'+p[1]]=1;});Object.keys(ms).sort().reverse().forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m.split('-')[1]+'/'+m.split('-')[0];$('hmes').appendChild(o);});}
+function fnum(n){return (Math.round(n)||0).toLocaleString('pt-BR');}
+function fcomp(n){n=n||0;if(n>=1e9)return (n/1e9).toFixed(1).replace('.',',')+' bi';if(n>=1e6)return (n/1e6).toFixed(1).replace('.',',')+' mi';if(n>=1e3)return Math.round(n/1e3)+' mil';return String(Math.round(n));}
+var HIST=null,HISTfeito=false,CHH={};
+function renderHistBI(){
+  if(HISTfeito)return;HISTfeito=true;
+  fetch('historico.json?v='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(h){
+    if(!h)return;HIST=h;
+    var totVol=0,totVal=0;(h.por_ano||[]).forEach(function(a){totVol+=a.volume||0;totVal+=a.valor||0;});
+    $('kPreg').textContent=fnum(h.total_pregoes||0);
+    $('kVol').textContent=fcomp(totVol);
+    $('kVal').textContent='R$ '+fcomp(totVal);
+    if(h.preco&&h.preco.mediana){$('kUnit').textContent='R$ '+fnum(h.preco.mediana);$('kUnitL').textContent='R$/m3 mediana · faixa '+fnum(h.preco.min)+'-'+fnum(h.preco.max);}
+    var anos=(h.por_ano||[]),labels=anos.map(function(a){return a.ano;});
+    for(var k in CHH){try{CHH[k].destroy();}catch(e){}}
+    CHH.preco=new Chart($('cPreco'),{type:'line',data:{labels:labels,datasets:[{label:'R$/m3',data:anos.map(function(a){return a.preco_medio;}),borderColor:'#C28E2C',backgroundColor:'rgba(194,142,44,.15)',tension:.3,fill:true,spanGaps:true,pointRadius:3}]},options:opt(false)});
+    CHH.vol=new Chart($('cVol'),{type:'bar',data:{labels:labels,datasets:[{data:anos.map(function(a){return a.volume;}),backgroundColor:'#3A4149',borderRadius:4}]},options:opt(false)});
+    var th='';(h.top_clientes||[]).slice(0,10).forEach(function(t){th+='<div class="hrow"><span class="nm" title="'+esc(t.cliente)+'">'+esc(t.cliente)+'</span><span class="mt"><b>'+fcomp(t.volume)+'</b> m3'+(t.valor?' · R$ '+fcomp(t.valor):'')+'</span></div>';});
+    $('htop').innerHTML=th||'<div style="color:#9CA3AF;padding:10px">Sem dados de pregoes.</div>';
+    var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'</span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+'</span></div>';});
+    $('hvencer').innerHTML=vh||'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>';
+  }).catch(function(){});
+}
 function renderHist(){
+  renderHistBI();
   var q=($('hbusca').value||'').toLowerCase().trim(),mes=$('hmes').value;
   var rows=DADOS.filter(function(r){
     if(mes){var p=g(r,'DATA SESSAO').split('/');if(p.length!==3||(p[2]+'-'+p[1])!==mes)return false;}
