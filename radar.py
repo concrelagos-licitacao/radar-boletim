@@ -147,14 +147,40 @@ def _geocode(municipio, uf):
     _GEO_CACHE[key] = None
     return None
 
+def _coord(v):
+    """Parseia coordenada tolerando virgula decimal br. NUNCA usar get_all_records p/ coord:
+    ele le '-21,215816' como -21215816 (virgula = milhar) e a distancia explode p/ ~7000km."""
+    s = str(v).strip().replace(',', '.')
+    try:
+        f = float(s)
+        return f if abs(f) > 0.01 else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _carregar_filiais(gc):
     for sid in [os.environ.get('GOOGLE_SHEETS_ID', ''), SHEET_ID]:
         if not sid:
             continue
         try:
-            rows = gc.open_by_key(sid).worksheet('Filiais').get_all_records()
-            return [r for r in rows if r.get('latitude') and r.get('longitude')
-                    and abs(float(r['latitude'])) > 0.01]
+            # get_all_VALUES (nao records): preserva a virgula decimal das coords
+            vals = gc.open_by_key(sid).worksheet('Filiais').get_all_values()
+            if len(vals) < 2:
+                continue
+            hdr = {h.strip().lower(): i for i, h in enumerate(vals[0])}
+            def cel(row, k):
+                i = hdr.get(k)
+                return row[i] if (i is not None and i < len(row)) else ''
+            out = []
+            for row in vals[1:]:
+                lat, lon = _coord(cel(row, 'latitude')), _coord(cel(row, 'longitude'))
+                if lat is None or lon is None:
+                    continue
+                out.append({'nome': cel(row, 'nome'), 'municipio': cel(row, 'municipio'),
+                            'uf': cel(row, 'uf'), 'tipo': cel(row, 'tipo'),
+                            'latitude': lat, 'longitude': lon})
+            if out:
+                return out
         except gspread.WorksheetNotFound:
             continue
         except Exception as e:
