@@ -4,6 +4,7 @@ import gspread
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import date
+from urllib.parse import quote
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 
@@ -47,6 +48,11 @@ def gerar_html(rows, hoje):
         for uf, n in sorted(por_uf.items(), key=lambda x: -x[1])
     )
 
+    # link do e-mail vai SEMPRE pro nosso site (sempre no ar), deep-link no edital.
+    # O link da fonte externa (Licitar Digital/PNCP) fica como secundario, pois abre
+    # direto do e-mail costuma dar "Not Found" (rota de SPA) ou pedir login.
+    site_url = os.environ.get('SITE_URL', 'https://concrelagos-licitacao.github.io/radar-boletim')
+
     linhas = ''
     for i, r in enumerate(rows):
         bg = '#ffffff' if i % 2 == 0 else '#F8F9FA'
@@ -58,7 +64,11 @@ def gerar_html(rows, hoje):
         km  = _badge_dist(r.get('DISTANCIA KM', ''))
         fil = _truncar(r.get('FILIAL PROXIMA', ''), 30)
         lnk = str(r.get('LINK', ''))
-        btn = f'<a href="{lnk}" style="background:#1565C0;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;text-decoration:none">Ver edital</a>' if lnk.startswith('http') else ''
+        num = str(r.get('NUMERO', '')).strip()
+        alvo = f'{site_url}/?busca={quote(num)}' if num else site_url
+        btn = (f'<a href="{alvo}" style="background:#1565C0;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;text-decoration:none">Ver no site</a>')
+        if lnk.startswith('http'):
+            btn += f'<br><a href="{lnk}" style="color:#888;font-size:10px;text-decoration:none">fonte ↗</a>'
 
         linhas += f'''
         <tr style="background:{bg}">
@@ -72,8 +82,6 @@ def gerar_html(rows, hoje):
           <td style="padding:8px 10px;text-align:center">{km}<br><span style="font-size:10px;color:#888">{fil}</span></td>
           <td style="padding:8px 10px;text-align:center">{btn}</td>
         </tr>'''
-
-    site_url = os.environ.get('SITE_URL', 'https://concrelagos-licitacao.github.io/radar-boletim')
 
     return f'''<!DOCTYPE html>
 <html>
