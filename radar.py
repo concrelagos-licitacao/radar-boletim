@@ -72,6 +72,44 @@ def _carregar_base_mun():
         print("  BASE MUNICIPIOS indisponivel (%s) -- caira no Nominatim" % repr(e)[:50])
     return _BASE_MUN
 
+_CONECT = {'de', 'do', 'da', 'dos', 'das', 'e'}
+def _cap(nome_norm):
+    """Title-case com conectores em minusculo: 'santa maria do suacui' -> 'Santa Maria do Suacui'."""
+    ps = nome_norm.split()
+    return ' '.join(p if (i and p in _CONECT) else p.capitalize() for i, p in enumerate(ps))
+
+_MUNIS_UF = {}
+def _munis_por_uf(uf):
+    """Lista [(nome_norm, canonical)] dos municipios de uma UF, do maior nome p/ o menor
+    (casa 'santa maria do suacui' antes de 'santa maria'). Cacheado."""
+    uf = uf.upper()
+    if uf in _MUNIS_UF:
+        return _MUNIS_UF[uf]
+    base = _carregar_base_mun()
+    lst = [(nn, _cap(nn)) for (nn, u) in base if u == uf]
+    lst.sort(key=lambda x: len(x[0]), reverse=True)
+    _MUNIS_UF[uf] = lst
+    return lst
+
+def _muni_de_orgao(orgao, uf):
+    """Extrai o municipio do nome do orgao ('PREFEITURA MUNICIPAL DE X' -> 'X') e VALIDA
+    contra o IBGE (so aceita se X existe como municipio da UF). Fail-open: '' se nao achar,
+    para nao inventar cidade errada (o edital segue sem distancia, nunca some por chute)."""
+    o = ' ' + _n(orgao).strip() + ' '
+    if not o.strip():
+        return ''
+    base = _carregar_base_mun()
+    # 1) tenta o trecho apos o ultimo conector "de/do/da/das/dos" (sem o sufixo /UF)
+    tail = re.split(r'\s+d[eoa]s?\s+', o)[-1].strip(' /.-')
+    tail = re.sub(r'[/-]\s*[a-z]{2}\s*$', '', tail).strip()
+    if tail and (tail, uf.upper()) in base:
+        return _cap(tail)
+    # 2) fallback: procura qualquer municipio da UF como trecho do nome (maior primeiro)
+    for nn, canon in _munis_por_uf(uf):
+        if len(nn) >= 4 and (' ' + nn + ' ') in o:
+            return canon
+    return ''
+
 def _haversine_km(p1, p2):
     lat1, lng1 = map(radians, p1)
     lat2, lng2 = map(radians, p2)
@@ -294,7 +332,8 @@ def coleta_licitar():
                     fut_sessao += 1
                     obj = it.get('simpleDescription') or ''
                     if not rel(obj): continue
-                    registros.append({'fonte': 'LICITAR_DIGITAL', 'uf': uf, 'municipio': '',
+                    registros.append({'fonte': 'LICITAR_DIGITAL', 'uf': uf,
+                                      'municipio': _muni_de_orgao(it.get('organizationName', ''), uf),
                                       'orgao': it.get('organizationName', ''), 'objeto': obj[:300],
                                       'data_sessao': ds, 'data_pub': iso(it.get('dateTimeInsert')),
                                       'numero': it.get('auctionNumber', ''),
