@@ -24,3 +24,4 @@ EMPRESAS/*.pdf
 *.md
 !DEPLOY.md
 !README.md
+.claude/launch.json

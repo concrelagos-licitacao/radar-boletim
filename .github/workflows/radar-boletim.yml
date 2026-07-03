@@ -32,6 +32,12 @@ jobs:
           mkdir -p credenciais
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credenciais/service_account.json
 
+      - name: Sincronizar filiais (planilha de alvaras -> aba Filiais)
+        env:
+          GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+        run: python sync_filiais.py || echo "sync filiais falhou -- radar segue com a base atual"
+
       - name: Rodar radar.py
         env:
           GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json

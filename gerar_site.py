@@ -390,6 +390,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .gbox{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--sh)}
   .gbox h4{font-size:.78rem;margin-bottom:10px}.gwrap{position:relative;height:200px}
   .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--sh)}
+  #s-hist .graficos{grid-template-columns:1fr 1fr}
+  .hgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;margin-bottom:16px}
+  .hrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:.82rem}
+  .hrow:last-child{border-bottom:0}
+  .hrow .nm{color:var(--primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hrow .mt{white-space:nowrap;color:var(--muted);font-size:.78rem}
+  .hrow .mt b{color:var(--accent-d);font-family:var(--disp);font-size:.8rem}
+  .dbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:.66rem;font-weight:700;color:#fff;font-family:var(--disp)}
   /* destaques */
   .destaque{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .dcard{border:1px solid var(--border);border-radius:11px;padding:13px 15px;border-left:4px solid var(--ok);background:#FAFBFC;transition:transform .22s var(--ease),box-shadow .22s}
@@ -598,8 +606,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="sec" id="s-hist">
+      <div class="cards" id="hkpi">
+        <div class="card"><div class="lbl">Pregoes disputados</div><div class="val" id="kPreg">-</div><div class="sub">desde 2019</div></div>
+        <div class="card"><div class="lbl">Volume contratado</div><div class="val" id="kVol">-</div><div class="sub">m3 acumulados</div></div>
+        <div class="card"><div class="lbl">Valor contratado</div><div class="val" id="kVal">-</div><div class="sub">R$ historico</div></div>
+        <div class="card"><div class="lbl">Preco tipico</div><div class="val" id="kUnit">-</div><div class="sub" id="kUnitL">R$/m3 (mediana)</div></div>
+      </div>
+      <div class="graficos">
+        <div class="gbox"><h4>Preco vencedor por ano (R$/m3)</h4><div class="gwrap"><canvas id="cPreco"></canvas></div></div>
+        <div class="gbox"><h4>Volume contratado por ano (m3)</h4><div class="gwrap"><canvas id="cVol"></canvas></div></div>
+      </div>
+      <div class="hgrid">
+        <div class="panel"><div class="clhead"><span class="ht">Top clientes por volume</span><span class="hs">m3 contratados (historico)</span></div><div id="htop"></div></div>
+        <div class="panel"><div class="clhead"><span class="ht">Contratos a vencer (90 dias)</span><span class="hs">hora de buscar a proxima ata</span></div><div id="hvencer"></div></div>
+      </div>
       <div class="panel">
-        <div class="clhead"><span class="ht">Historico</span><span class="hs">todos os editais ja captados, acumulados</span></div>
+        <div class="clhead"><span class="ht">Arquivo de editais</span><span class="hs">todos os editais ja captados pelo radar, acumulados</span></div>
         <div class="filtros">
           <div class="fcol" style="flex:1"><label>Buscar</label><input id="hbusca" placeholder="objeto, orgao, municipio, UF..."></div>
           <div class="fcol"><label>Mes da sessao</label><select id="hmes"><option value="">Todos</option></select></div>
@@ -609,6 +631,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <thead><tr><th>Captado</th><th>Sessao</th><th>UF</th><th>Municipio</th><th>Orgao</th><th>Objeto</th><th>Fonte</th><th>Edital</th></tr></thead>
           <tbody id="histbody"></tbody></table></div>
       </div>
+      <div class="foot" style="margin-top:6px">Precificacao a partir do historico de pregoes da Concrelagos — leitura automatica, confira sempre a fonte.</div>
     </div>
 
     <div class="sec" id="s-analise">
@@ -943,7 +966,30 @@ function exportarCSV(){
 }
 
 function popularMes(){var ms={};DADOS.forEach(function(r){var p=g(r,'DATA SESSAO').split('/');if(p.length===3)ms[p[2]+'-'+p[1]]=1;});Object.keys(ms).sort().reverse().forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m.split('-')[1]+'/'+m.split('-')[0];$('hmes').appendChild(o);});}
+function fnum(n){return (Math.round(n)||0).toLocaleString('pt-BR');}
+function fcomp(n){n=n||0;if(n>=1e9)return (n/1e9).toFixed(1).replace('.',',')+' bi';if(n>=1e6)return (n/1e6).toFixed(1).replace('.',',')+' mi';if(n>=1e3)return Math.round(n/1e3)+' mil';return String(Math.round(n));}
+var HIST=null,HISTfeito=false,CHH={};
+function renderHistBI(){
+  if(HISTfeito)return;HISTfeito=true;
+  fetch('historico.json?v='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(h){
+    if(!h)return;HIST=h;
+    var totVol=0,totVal=0;(h.por_ano||[]).forEach(function(a){totVol+=a.volume||0;totVal+=a.valor||0;});
+    $('kPreg').textContent=fnum(h.total_pregoes||0);
+    $('kVol').textContent=fcomp(totVol);
+    $('kVal').textContent='R$ '+fcomp(totVal);
+    if(h.preco&&h.preco.mediana){$('kUnit').textContent='R$ '+fnum(h.preco.mediana);$('kUnitL').textContent='R$/m3 mediana · faixa '+fnum(h.preco.min)+'-'+fnum(h.preco.max);}
+    var anos=(h.por_ano||[]),labels=anos.map(function(a){return a.ano;});
+    for(var k in CHH){try{CHH[k].destroy();}catch(e){}}
+    CHH.preco=new Chart($('cPreco'),{type:'line',data:{labels:labels,datasets:[{label:'R$/m3',data:anos.map(function(a){return a.preco_medio;}),borderColor:'#C28E2C',backgroundColor:'rgba(194,142,44,.15)',tension:.3,fill:true,spanGaps:true,pointRadius:3}]},options:opt(false)});
+    CHH.vol=new Chart($('cVol'),{type:'bar',data:{labels:labels,datasets:[{data:anos.map(function(a){return a.volume;}),backgroundColor:'#3A4149',borderRadius:4}]},options:opt(false)});
+    var th='';(h.top_clientes||[]).slice(0,10).forEach(function(t){th+='<div class="hrow"><span class="nm" title="'+esc(t.cliente)+'">'+esc(t.cliente)+'</span><span class="mt"><b>'+fcomp(t.volume)+'</b> m3'+(t.valor?' · R$ '+fcomp(t.valor):'')+'</span></div>';});
+    $('htop').innerHTML=th||'<div style="color:#9CA3AF;padding:10px">Sem dados de pregoes.</div>';
+    var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'</span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+'</span></div>';});
+    $('hvencer').innerHTML=vh||'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>';
+  }).catch(function(){});
+}
 function renderHist(){
+  renderHistBI();
   var q=($('hbusca').value||'').toLowerCase().trim(),mes=$('hmes').value;
   var rows=DADOS.filter(function(r){
     if(mes){var p=g(r,'DATA SESSAO').split('/');if(p.length!==3||(p[2]+'-'+p[1])!==mes)return false;}
@@ -1086,6 +1132,207 @@ def gerar_filiais_json():
         return 0
 
 
+def _money_br(s):
+    """'R$ 3.329.000,00' -> 3329000.0 ; '' -> None. Formato brasileiro (ponto=milhar)."""
+    s = re.sub(r'[^\d,.-]', '', str(s or ''))
+    if not s:
+        return None
+    s = s.replace('.', '').replace(',', '.')   # ponto=milhar, virgula=decimal
+    try:
+        v = float(s)
+        return v if v > 0 else None
+    except ValueError:
+        return None
+
+
+def _vol_br(s):
+    """'11.500' -> 11500.0 ; '1.125' -> 1125.0 (ponto=milhar). '' -> None."""
+    s = re.sub(r'[^\d,.-]', '', str(s or ''))
+    if not s:
+        return None
+    if ',' in s:                # tem decimal explicito
+        s = s.replace('.', '').replace(',', '.')
+    else:                       # so pontos = separador de milhar
+        s = s.replace('.', '')
+    try:
+        v = float(s)
+        return v if v > 0 else None
+    except ValueError:
+        return None
+
+
+def _data_br(s):
+    """'01/11/2019' -> date; aceita 1-2 digitos. None se invalido."""
+    s = str(s or '').strip()
+    for fmt in ('%d/%m/%Y', '%d/%m/%y', '%d-%m-%Y'):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _col(hdr_norm, *kws):
+    """Acha indice da 1a coluna cujo header normalizado contem TODAS as kws."""
+    for i, h in enumerate(hdr_norm):
+        if all(k in h for k in kws):
+            return i
+    return None
+
+
+def gerar_historico_json():
+    """Le PREGOES + LICITACOES GANHAS + ADITIVOS e gera docs/historico.json:
+    a inteligencia de PRECIFICACAO (R$/m3 por ano/cliente/objeto), volume e valor
+    contratado por ano, top clientes e contratos a vencer em 90 dias. O ativo que o
+    ConLicitacao nao tem. Falha graciosa: sem as abas, retorna 0 e o site segue."""
+    try:
+        creds = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
+        gc = gspread.service_account(filename=creds)
+        sh = gc.open_by_key(SHEET_ID)
+    except Exception as e:
+        print('  historico.json: sem acesso ao Sheet (%s)' % repr(e)[:60])
+        return 0
+
+    def ler(nome):
+        try:
+            return sh.worksheet(nome).get_all_values()
+        except Exception:
+            return []
+
+    def parse_aba(vals, aba_tag):
+        """Extrai registros limpos de uma aba de pregoes. Casa colunas por keyword."""
+        if len(vals) < 2:
+            return []
+        hn = [_n(h) for h in vals[0]]
+        iEmp = _col(hn, 'empresa'); iCli = _col(hn, 'cliente'); iAno = _col(hn, 'ano')
+        iObj = _col(hn, 'objeto'); iData = _col(hn, 'data', 'pregao')
+        iVolC = _col(hn, 'vol', 'contratado') or _col(hn, 'contratado')
+        iVolT = _col(hn, 'vol', 'total')
+        iVal = _col(hn, 'valor', 'total') or _col(hn, 'valor')
+        iUnit = _col(hn, 'preco', 'unit') or _col(hn, 'unitario')
+        iVald = _col(hn, 'validade') or _col(hn, 'data', 'validade')
+        iSit = _col(hn, 'situacao') or _col(hn, 'aditivo')
+
+        def cel(row, i):
+            return row[i].strip() if (i is not None and i < len(row)) else ''
+        out = []
+        for row in vals[1:]:
+            emp = cel(row, iEmp); cli = cel(row, iCli)
+            if not emp and not cli:
+                continue
+            valor = _money_br(cel(row, iVal))
+            volc = _vol_br(cel(row, iVolC))
+            volt = _vol_br(cel(row, iVolT))
+            unit = _money_br(cel(row, iUnit))
+            if unit is None and valor and volc:      # deriva R$/m3 se faltar
+                unit = round(valor / volc, 2)
+            ano = cel(row, iAno)
+            m = re.search(r'(20\d{2})', ano) or re.search(r'(20\d{2})', cel(row, iData))
+            ano = m.group(1) if m else ''
+            vald = _data_br(cel(row, iVald))
+            out.append({
+                'fonte': aba_tag, 'empresa': emp, 'cliente': cli,
+                'objeto': cel(row, iObj), 'ano': ano,
+                'data': cel(row, iData), 'volume': volc or volt,
+                'valor': valor, 'preco_unit': unit,
+                'validade': vald.isoformat() if vald else '',
+                'situacao': cel(row, iSit),
+            })
+        return out
+
+    preg = parse_aba(ler('PREGOES'), 'pregao')
+    ganhas = parse_aba(ler('LICITACOES GANHAS - PRAZO DE CONTRATOS '), 'ganha')
+    if not ganhas:
+        ganhas = parse_aba(ler('LICITAÇÕES GANHAS - PRAZO DE CONTRATOS '), 'ganha')
+    adit = parse_aba(ler('ADITIVOS LICITAÇÕES'), 'aditivo') or parse_aba(ler('ADITIVOS LICITACOES'), 'aditivo')
+    todos = preg + ganhas + adit
+    if not todos:
+        print('  historico.json: nenhum pregao lido')
+        return 0
+
+    # ---- agregados de PRECIFICACAO ----
+    por_ano = {}
+    for r in preg:                       # so pregoes historicos p/ series temporais
+        a = r['ano']
+        if not a:
+            continue
+        d = por_ano.setdefault(a, {'n': 0, 'volume': 0.0, 'valor': 0.0, 'precos': []})
+        d['n'] += 1
+        d['volume'] += r['volume'] or 0
+        d['valor'] += r['valor'] or 0
+        if r['preco_unit']:
+            d['precos'].append(r['preco_unit'])
+    anos = []
+    for a in sorted(por_ano):
+        d = por_ano[a]
+        ps = sorted(d['precos'])
+        anos.append({'ano': a, 'n': d['n'], 'volume': round(d['volume']),
+                     'valor': round(d['valor']),
+                     'preco_medio': round(sum(ps) / len(ps), 2) if ps else None,
+                     'preco_min': ps[0] if ps else None,
+                     'preco_max': ps[-1] if ps else None})
+
+    # top clientes por volume
+    cli_ag = {}
+    for r in preg:
+        c = r['cliente'].strip()
+        if not c:
+            continue
+        d = cli_ag.setdefault(c, {'volume': 0.0, 'valor': 0.0, 'n': 0})
+        d['volume'] += r['volume'] or 0
+        d['valor'] += r['valor'] or 0
+        d['n'] += 1
+    top_cli = sorted(({'cliente': c, **v} for c, v in cli_ag.items()),
+                     key=lambda x: x['volume'], reverse=True)[:15]
+    for t in top_cli:
+        t['volume'] = round(t['volume']); t['valor'] = round(t['valor'])
+
+    # contratos a vencer em 90 dias (ganhas + aditivos com validade)
+    hoje = datetime.now(timezone(timedelta(hours=-3))).date()
+    vencer = []
+    for r in ganhas + adit + preg:
+        if not r['validade']:
+            continue
+        try:
+            dv = datetime.strptime(r['validade'], '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        dias = (dv - hoje).days
+        if 0 <= dias <= 90:
+            vencer.append({'cliente': r['cliente'], 'objeto': r['objeto'],
+                           'validade': r['validade'], 'dias': dias,
+                           'valor': r['valor'], 'situacao': r['situacao']})
+    vencer.sort(key=lambda x: x['dias'])
+
+    # preco unitario geral (mediana e faixa) dos pregoes com R$/m3
+    precos = sorted(r['preco_unit'] for r in preg if r['preco_unit'])
+    resumo_preco = {}
+    if precos:
+        n = len(precos)
+        resumo_preco = {'n': n, 'min': precos[0], 'max': precos[-1],
+                        'mediana': precos[n // 2],
+                        'media': round(sum(precos) / n, 2)}
+
+    # lista enxuta p/ tabela (ordena por ano desc, cliente)
+    def _ord(r):
+        return (r['ano'] or '0', r['cliente'])
+    lista = sorted(preg + ganhas, key=_ord, reverse=True)
+    for r in lista:
+        r.pop('data', None)
+
+    out = {
+        'gerado': _hoje_brt(),
+        'total_pregoes': len(preg), 'total_ganhas': len(ganhas), 'total_aditivos': len(adit),
+        'por_ano': anos, 'top_clientes': top_cli, 'vencer_90d': vencer,
+        'preco': resumo_preco, 'registros': lista,
+    }
+    with open(os.path.join(DOCS, 'historico.json'), 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
+    print('  historico.json: %d pregoes, %d ganhas, %d aditivos | %d anos, %d a vencer 90d, %d precos'
+          % (len(preg), len(ganhas), len(adit), len(anos), len(vencer), len(precos)))
+    return len(lista)
+
+
 def main():
     os.makedirs(DOCS, exist_ok=True)
     open(os.path.join(DOCS, '.nojekyll'), 'w').close()
@@ -1113,6 +1360,8 @@ def main():
     print('Filiais no mapa: %s' % ('%d (site deve estar protegido!)' % nf if nf else 'OFF (trava de privacidade)'))
     nd = gerar_diario_json()
     print('Diario de execucao: %d registros' % nd)
+    nh = gerar_historico_json()
+    print('Historico de pregoes (precificacao): %d registros' % nh)
 
     novos_hoje = sum(1 for r in todos if r.get('capturado_em') == hoje)
     html = gerar_html(len(todos), novos_hoje, hoje)
