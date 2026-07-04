@@ -153,10 +153,11 @@ def main():
     pego = [c for c in alvo if achou(c)]
     faltou = [c for c in alvo if not achou(c)]
     n = len(alvo)
-    print("\n================= PLACAR =================")
-    print("Radar pegou: %d de %d  (%.0f%%)" % (len(pego), n, 100.0 * len(pego) / n))
-    print("Faltaram:    %d" % len(faltou))
-    print("==========================================")
+    print("\n================= PLACAR (PILOTO) =================")
+    print("Radar pegou: %d de %d editais PE concreto/brita" % (len(pego), n))
+    print("Faltaram:    %d (conferir se sao FORA DO RAIO = ok, ou perda real)" % len(faltou))
+    print("AMOSTRA PEQUENA — nao afirmar '100%'. Diga: '%d/%d no piloto, seguimos medindo'." % (len(pego), n))
+    print("==================================================")
     if faltou:
         print("\n--- FALTARAM (conferir: fora do raio? fonte? atraso?) ---")
         for c in faltou[:40]:

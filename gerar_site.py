@@ -329,8 +329,10 @@ def enriquecer_resumo(todos):
 
 
 def gerar_html(total, novos_hoje, hoje):
-    atualizado = datetime.now(timezone(timedelta(hours=-3))).strftime('%d/%m/%Y %H:%M')
+    agora = datetime.now(timezone(timedelta(hours=-3)))
+    atualizado = agora.strftime('%d/%m/%Y %H:%M')
     return HTML_TEMPLATE.replace('{{ATUALIZADO}}', atualizado) \
+                        .replace('{{GERADO_ISO}}', agora.strftime('%Y-%m-%dT%H:%M:%S')) \
                         .replace('{{TOTAL}}', str(total)) \
                         .replace('{{NOVOS}}', str(novos_hoje)) \
                         .replace('{{HOJE}}', hoje)
@@ -341,6 +343,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
 <title>Concrelagos - Radar de Licitacoes</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
@@ -482,6 +485,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .orgbox{background:#EAF5EC;border:1px solid #BFE3C6;border-left:4px solid var(--ok);border-radius:8px;padding:9px 12px;margin:8px 0}
   .orgbox b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#15803D;margin-bottom:4px;font-family:var(--disp)}
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
+  .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -529,6 +533,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div id="erro"></div>
+    <div id="frescor" data-gerado="{{GERADO_ISO}}" style="display:none"></div>
 
     <div class="tabbar">
       <button class="tabbtn on" data-t="geral">Dashboard</button>
@@ -1008,7 +1013,7 @@ function precoOrgaoHTML(r){               // "ja negociamos com este orgao" (cru
   var mun=mnorm(g(r,'MUNICIPIO')),e=PRECOS_ORGAO[mun];
   if(!e){var org=mnorm(g(r,'ORGAO'));for(var k in PRECOS_ORGAO){if(k.length>=4&&org.indexOf(k)>=0){e=PRECOS_ORGAO[k];break;}}}
   if(!e)return '';
-  var faixa=e.preco_med?('R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
+  var faixa=e.preco_med?('faixa usual R$ '+fnum(e.preco_p25)+'–'+fnum(e.preco_p75)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
   return '<div class="orgbox"><b>Já negociamos com este órgão</b><div class="rtxt">'+e.n+' pregão(ões) no histórico'+(e.ultimo_ano?' (última em '+esc(e.ultimo_ano)+')':'')+' · '+faixa+(e.volume?' · '+fcomp(e.volume)+' m³ contratados':'')+'<br><span style="color:#9CA3AF;font-size:.72rem">referência do que já praticamos — confira o edital atual</span></div></div>';
 }
 function renderHistBI(){
@@ -1049,12 +1054,12 @@ function renderPrecos(){
   carregaHist(function(){
     var q=mnorm(($('pbusca')||{}).value||'');
     var lst=Object.keys(PRECOS_ORGAO).map(function(k){var e=PRECOS_ORGAO[k];return {k:k,e:e};});
-    lst=lst.filter(function(o){return o.e.preco_med!=null;});
+    lst=lst.filter(function(o){return o.e.preco_med!=null&&o.e.preco_p25!=null;});
     if(q)lst=lst.filter(function(o){return o.k.indexOf(q)>=0||mnorm(o.e.cliente).indexOf(q)>=0;});
     lst.sort(function(a,b){return b.e.n-a.e.n;});
     $('pcount').textContent=lst.length+' orgaos com preco no historico'+(q?' (filtro: '+q+')':'');
     var h='';lst.slice(0,400).forEach(function(o){var e=o.e;
-      h+='<tr><td class="org" title="'+esc(e.cliente)+'">'+esc(e.cliente)+'</td><td style="text-align:center">'+e.n+'</td><td style="white-space:nowrap">R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'</td><td style="white-space:nowrap"><b style="color:var(--accent-d)">R$ '+fnum(e.preco_med)+'</b></td><td style="white-space:nowrap">'+(e.volume?fcomp(e.volume)+' m3':'-')+'</td><td style="text-align:center">'+esc(e.ultimo_ano||'-')+'</td></tr>';
+      h+='<tr><td class="org" title="'+esc(e.cliente)+'">'+esc(e.cliente)+'</td><td style="text-align:center">'+e.n+'</td><td style="white-space:nowrap">R$ '+fnum(e.preco_p25)+'–'+fnum(e.preco_p75)+'</td><td style="white-space:nowrap"><b style="color:var(--accent-d)">R$ '+fnum(e.preco_med)+'</b></td><td style="white-space:nowrap">'+(e.volume?fcomp(e.volume)+' m3':'-')+'</td><td style="text-align:center">'+esc(e.ultimo_ano||'-')+'</td></tr>';
     });
     $('precosbody').innerHTML=h||'<tr><td colspan="6" style="padding:20px;text-align:center;color:#9CA3AF">Nenhum orgao encontrado.</td></tr>';
   });
@@ -1110,6 +1115,13 @@ $('bdesc').addEventListener('click',function(){verDesc=!verDesc;$('bdesc').class
 $('bcsv').addEventListener('click',exportarCSV);
 $('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;SEL={};$('stLic').classList.add('on');$('stAcc').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='score';ordDir=-1;if($('fordem'))$('fordem').value='score';aplicar();});
 
+function checkFrescor(){
+  var el=$('frescor');if(!el)return;var iso=el.getAttribute('data-gerado');if(!iso)return;
+  var g=new Date(iso),h=(Date.now()-g.getTime())/3.6e6;
+  if(h>18){el.style.display='block';el.className='frescor-warn';
+    el.innerHTML='&#9888; Dados podem estar DESATUALIZADOS — ultima coleta ha '+Math.round(h)+'h ('+iso.slice(8,10)+'/'+iso.slice(5,7)+' '+iso.slice(11,16)+'). O robo pode ter falhado; confira na fonte antes de decidir.';}
+}
+checkFrescor();
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
   DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
@@ -1362,13 +1374,15 @@ def gerar_historico_json():
                            'valor': r['valor'], 'situacao': r['situacao']})
     vencer.sort(key=lambda x: x['dias'])
 
-    # preco unitario geral (mediana e faixa) dos pregoes com R$/m3
-    precos = sorted(r['preco_unit'] for r in preg if r['preco_unit'])
+    # preco unitario geral (mediana e faixa TRIMADA p10-p90 p/ nao mostrar outlier) dos pregoes
+    precos = sorted(p for p in (r['preco_unit'] for r in preg if r['preco_unit']) if 40 <= p <= 2000)
     resumo_preco = {}
     if precos:
         n = len(precos)
-        resumo_preco = {'n': n, 'min': precos[0], 'max': precos[-1],
-                        'mediana': precos[n // 2],
+        def _q(q):
+            return precos[min(n - 1, int(q * (n - 1) + 0.5))]
+        resumo_preco = {'n': n, 'min': _q(0.10), 'max': _q(0.90),
+                        'mediana': _q(0.5),
                         'media': round(sum(precos) / n, 2)}
 
     # ---- PRECIFICACAO POR ORGAO (o diferencial: "ja negociamos com esta prefeitura") ----
@@ -1392,13 +1406,17 @@ def gerar_historico_json():
         d['volume'] += r['volume'] or 0
         if r['ano']:
             d['anos'].append(r['ano'])
+    def _pct(a, q):
+        if not a:
+            return None
+        return a[min(len(a) - 1, int(q * (len(a) - 1) + 0.5))]
     precos_por_orgao = {}
     for mk, d in orgao_ag.items():
-        ps = sorted(d['precos'])
+        ps = sorted(p for p in d['precos'] if 40 <= p <= 2000)   # tira erro grosseiro de digitacao
         precos_por_orgao[mk] = {
             'cliente': d['cliente'], 'n': d['n'], 'volume': round(d['volume']),
-            'preco_med': ps[len(ps) // 2] if ps else None,
-            'preco_min': ps[0] if ps else None, 'preco_max': ps[-1] if ps else None,
+            'preco_med': _pct(ps, 0.5),
+            'preco_p25': _pct(ps, 0.25), 'preco_p75': _pct(ps, 0.75),
             'ultimo_ano': max(d['anos']) if d['anos'] else '',
         }
 
@@ -1425,6 +1443,9 @@ def gerar_historico_json():
 def main():
     os.makedirs(DOCS, exist_ok=True)
     open(os.path.join(DOCS, '.nojekyll'), 'w').close()
+    # robots: pede pros buscadores NAO indexar (proteção parcial — o real e Cloudflare Access)
+    with open(os.path.join(DOCS, 'robots.txt'), 'w', encoding='utf-8') as _rf:
+        _rf.write('User-agent: *\nDisallow: /\n')
     hoje = _hoje_brt()
 
     novos = carregar_aba()

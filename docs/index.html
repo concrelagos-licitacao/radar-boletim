@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
 <title>Concrelagos - Radar de Licitacoes</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
@@ -144,6 +145,7 @@
   .orgbox{background:#EAF5EC;border:1px solid #BFE3C6;border-left:4px solid var(--ok);border-radius:8px;padding:9px 12px;margin:8px 0}
   .orgbox b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#15803D;margin-bottom:4px;font-family:var(--disp)}
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
+  .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -187,10 +189,11 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
         <div class="s">Radar de licitacoes de concreto &amp; brita (Pregao Eletronico) + precificacao por orgao · fontes: PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>04/07/2026 13:55</b></div>
+      <div class="updated">Ultima varredura<br><b>04/07/2026 14:36</b></div>
     </div>
 
     <div id="erro"></div>
+    <div id="frescor" data-gerado="2026-07-04T14:36:30" style="display:none"></div>
 
     <div class="tabbar">
       <button class="tabbtn on" data-t="geral">Dashboard</button>
@@ -670,7 +673,7 @@ function precoOrgaoHTML(r){               // "ja negociamos com este orgao" (cru
   var mun=mnorm(g(r,'MUNICIPIO')),e=PRECOS_ORGAO[mun];
   if(!e){var org=mnorm(g(r,'ORGAO'));for(var k in PRECOS_ORGAO){if(k.length>=4&&org.indexOf(k)>=0){e=PRECOS_ORGAO[k];break;}}}
   if(!e)return '';
-  var faixa=e.preco_med?('R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
+  var faixa=e.preco_med?('faixa usual R$ '+fnum(e.preco_p25)+'–'+fnum(e.preco_p75)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
   return '<div class="orgbox"><b>Já negociamos com este órgão</b><div class="rtxt">'+e.n+' pregão(ões) no histórico'+(e.ultimo_ano?' (última em '+esc(e.ultimo_ano)+')':'')+' · '+faixa+(e.volume?' · '+fcomp(e.volume)+' m³ contratados':'')+'<br><span style="color:#9CA3AF;font-size:.72rem">referência do que já praticamos — confira o edital atual</span></div></div>';
 }
 function renderHistBI(){
@@ -711,12 +714,12 @@ function renderPrecos(){
   carregaHist(function(){
     var q=mnorm(($('pbusca')||{}).value||'');
     var lst=Object.keys(PRECOS_ORGAO).map(function(k){var e=PRECOS_ORGAO[k];return {k:k,e:e};});
-    lst=lst.filter(function(o){return o.e.preco_med!=null;});
+    lst=lst.filter(function(o){return o.e.preco_med!=null&&o.e.preco_p25!=null;});
     if(q)lst=lst.filter(function(o){return o.k.indexOf(q)>=0||mnorm(o.e.cliente).indexOf(q)>=0;});
     lst.sort(function(a,b){return b.e.n-a.e.n;});
     $('pcount').textContent=lst.length+' orgaos com preco no historico'+(q?' (filtro: '+q+')':'');
     var h='';lst.slice(0,400).forEach(function(o){var e=o.e;
-      h+='<tr><td class="org" title="'+esc(e.cliente)+'">'+esc(e.cliente)+'</td><td style="text-align:center">'+e.n+'</td><td style="white-space:nowrap">R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'</td><td style="white-space:nowrap"><b style="color:var(--accent-d)">R$ '+fnum(e.preco_med)+'</b></td><td style="white-space:nowrap">'+(e.volume?fcomp(e.volume)+' m3':'-')+'</td><td style="text-align:center">'+esc(e.ultimo_ano||'-')+'</td></tr>';
+      h+='<tr><td class="org" title="'+esc(e.cliente)+'">'+esc(e.cliente)+'</td><td style="text-align:center">'+e.n+'</td><td style="white-space:nowrap">R$ '+fnum(e.preco_p25)+'–'+fnum(e.preco_p75)+'</td><td style="white-space:nowrap"><b style="color:var(--accent-d)">R$ '+fnum(e.preco_med)+'</b></td><td style="white-space:nowrap">'+(e.volume?fcomp(e.volume)+' m3':'-')+'</td><td style="text-align:center">'+esc(e.ultimo_ano||'-')+'</td></tr>';
     });
     $('precosbody').innerHTML=h||'<tr><td colspan="6" style="padding:20px;text-align:center;color:#9CA3AF">Nenhum orgao encontrado.</td></tr>';
   });
@@ -772,6 +775,13 @@ $('bdesc').addEventListener('click',function(){verDesc=!verDesc;$('bdesc').class
 $('bcsv').addEventListener('click',exportarCSV);
 $('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;SEL={};$('stLic').classList.add('on');$('stAcc').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='score';ordDir=-1;if($('fordem'))$('fordem').value='score';aplicar();});
 
+function checkFrescor(){
+  var el=$('frescor');if(!el)return;var iso=el.getAttribute('data-gerado');if(!iso)return;
+  var g=new Date(iso),h=(Date.now()-g.getTime())/3.6e6;
+  if(h>18){el.style.display='block';el.className='frescor-warn';
+    el.innerHTML='&#9888; Dados podem estar DESATUALIZADOS — ultima coleta ha '+Math.round(h)+'h ('+iso.slice(8,10)+'/'+iso.slice(5,7)+' '+iso.slice(11,16)+'). O robo pode ter falhado; confira na fonte antes de decidir.';}
+}
+checkFrescor();
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
   DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
