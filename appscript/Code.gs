@@ -14,7 +14,7 @@
  */
 
 var SHEET_ID  = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg';
-var CACHE_SEG = 60;
+var CACHE_SEG = 5;   // cache curto: edições na planilha aparecem em ~5s
 
 // Empresas do grupo -> nome curto + cor da logo (igual ao site Streamlit)
 var EMP_DOMINIO = ['Concrelagos', 'Pedreira Imboassica', 'Apolo', 'Pedreira Outeiro', 'Pedreira Bangu', 'IPEPAM', 'Outras'];
@@ -28,6 +28,11 @@ function onOpen() {
 }
 
 function doGet(e) {
+  // diagnóstico: /exec?debug=1 limpa o cache e devolve os dados em JSON puro
+  if (e && e.parameter && e.parameter.debug) {
+    CacheService.getScriptCache().remove('hist');
+    return ContentService.createTextOutput(JSON.stringify(getDados())).setMimeType(ContentService.MimeType.JSON);
+  }
   return HtmlService.createHtmlOutputFromFile('Dashboard')
     .setTitle('Concrelagos — Histórico Comercial')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
