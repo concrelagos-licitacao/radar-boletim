@@ -302,6 +302,7 @@ def coleta_pncp():
     for uf in UFS:
         if not ok_tempo(): print("  PNCP: orcamento de tempo esgotado"); break
         uf_falhou = False
+        n_uf = n
         for (d_ini, d_fim) in _janelas_pncp(PNCP_JANELA_DIAS):
             if not ok_tempo(): break
             pag, tot = 1, 1
@@ -331,7 +332,9 @@ def coleta_pncp():
                 if not data: break
                 pag += 1; time.sleep(0.3)
             time.sleep(0.2)
-        if uf_falhou: PNCP_TRUNC.append(uf)   # alguma janela falhou -> dados podem estar incompletos
+        # so alerta TRUNCOU se a UF falhou de vez E nao trouxe NADA (senao e falso alarme:
+        # uma janela antiga pode falhar mas a recente ja pegou os editais que importam).
+        if uf_falhou and n == n_uf: PNCP_TRUNC.append(uf)
         time.sleep(0.3)
     return n
 

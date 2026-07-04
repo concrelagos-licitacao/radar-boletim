@@ -486,6 +486,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .orgbox b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#15803D;margin-bottom:4px;font-family:var(--disp)}
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
+  .stbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:.6rem;font-weight:700;color:#fff;font-family:var(--disp);letter-spacing:.02em;margin-left:5px;vertical-align:middle}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -574,6 +575,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="fcol"><label>Fonte</label><select id="ffonte"><option value="">Todas</option></select></div>
           <div class="fcol"><label>Modalidade</label><select id="fmod"><option value="">Todas</option></select></div>
           <div class="fcol"><label>Situacao</label><select id="fsit"><option value="">Todas</option><option value="ab">Abertas (sessao futura)</option><option value="en">Encerradas</option></select></div>
+          <div class="fcol"><label>Status (acompanhamento)</label><select id="fstatus"><option value="">Todos</option><option value="__sem">Sem status</option></select></div>
           <div class="fcol"><label>Valor minimo (R$)</label><input id="fvalor" type="number" min="0" step="10000" placeholder="0"></div>
           <div class="fcol"><label>Ordenar por</label><select id="fordem"><option value="score">Melhor oportunidade</option><option value="data">Sessao mais proxima</option><option value="valor">Maior valor</option><option value="km">Menor distancia</option></select></div>
           <div class="fcol"><label>Distancia max: <span class="rangeval" id="kmval">qualquer</span></label><input type="range" id="fkm" min="0" max="1000" step="25" value="1000"></div>
@@ -697,6 +699,8 @@ function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a'
 function valNum(r){var v=g(r,'VALOR').replace(/\./g,'').replace(',','.');var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
 function fmtBRL(n){if(n==null)return '-';if(n>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';return 'R$ '+n.toLocaleString('pt-BR',{maximumFractionDigits:0});}
 function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
+var STCOR={'novo':'#6B7280','analisando':'#1565C0','vou dar lance':'#C28E2C','ganhamos':'#16A34A','perdemos':'#9CA3AF','descartado':'#DC2626'};
+function statusBadge(r){var s=(g(r,'STATUS')||'').trim();if(!s)return '';var c=STCOR[s.toLowerCase()]||'#3A4149';var resp=g(r,'RESPONSAVEL');return '<span class="stbadge" style="background:'+c+'" title="acompanhamento (planilha)">'+esc(s)+(resp?' · '+esc(resp):'')+'</span>';}
 function favKey(r){return g(r,'NUMERO')||g(r,'LINK')||(g(r,'DATA SESSAO')+'|'+g(r,'ORGAO')+'|'+g(r,'OBJETO').slice(0,40));}
 function isFav(r){return !!FAV[favKey(r)];}
 function isLido(r){return !!LIDO[favKey(r)];}
@@ -731,16 +735,18 @@ function veredito(r){
 }
 
 function popular(){
-  var u={},f={},m={};
-  DADOS.forEach(function(r){if(g(r,'UF'))u[g(r,'UF')]=1;if(g(r,'FONTE'))f[g(r,'FONTE')]=1;if(g(r,'MODALIDADE'))m[g(r,'MODALIDADE')]=1;});
+  var u={},f={},m={},st={};
+  DADOS.forEach(function(r){if(g(r,'UF'))u[g(r,'UF')]=1;if(g(r,'FONTE'))f[g(r,'FONTE')]=1;if(g(r,'MODALIDADE'))m[g(r,'MODALIDADE')]=1;var s=(g(r,'STATUS')||'').trim();if(s)st[s]=1;});
   Object.keys(u).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('fuf').appendChild(o);});
   Object.keys(f).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('ffonte').appendChild(o);});
   Object.keys(m).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('fmod').appendChild(o);});
+  if($('fstatus'))Object.keys(st).sort().forEach(function(x){var o=document.createElement('option');o.value=x;o.textContent=x;$('fstatus').appendChild(o);});
 }
 
 function aplicar(){
   var q=$('busca').value.toLowerCase().trim(),uf=$('fuf').value,fo=$('ffonte').value,mo=$('fmod').value,
-      sit=$('fsit').value,vmin=parseFloat($('fvalor').value)||0,kmMax=+$('fkm').value;
+      sit=$('fsit').value,vmin=parseFloat($('fvalor').value)||0,kmMax=+$('fkm').value,
+      stt=($('fstatus')?$('fstatus').value:'');
   $('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
   var hoje=new Date();hoje.setHours(0,0,0,0);
   VIS=DADOS.filter(function(r){
@@ -754,6 +760,7 @@ function aplicar(){
     if(vmin>0){var v=valNum(r);if(v==null||v<vmin)return false;}
     if(kmMax<1000){var n=kmNum(r);if(n==null||n>kmMax)return false;}
     if(sit){var dt=parseBR(g(r,'DATA SESSAO'));if(sit==='ab'){if(!dt||dt<hoje)return false;}else{if(dt&&dt>=hoje)return false;}}
+    if(stt){var s=(g(r,'STATUS')||'').trim();if(stt==='__sem'){if(s)return false;}else if(s!==stt)return false;}
     if(q){var b=(g(r,'OBJETO')+' '+g(r,'ORGAO')+' '+g(r,'MUNICIPIO')+' '+g(r,'NUMERO')+' '+g(r,'UF')).toLowerCase();if(b.indexOf(q)<0)return false;}
     return true;
   });
@@ -870,7 +877,7 @@ function renderTabela(){
       +'<td>'+chkHTML(gi,r)+'</td>'
       +'<td class="acts">'+actHTML(gi,r)+'</td>'
       +'<td><span class="sc2" style="background:'+scCor(s)+'">'+s+'</span></td>'
-      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+(isLido(r)?'<span class="selo">LIDO</span>':'')+'</td>'
+      +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+(isLido(r)?'<span class="selo">LIDO</span>':'')+statusBadge(r)+'</td>'
       +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
       +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
@@ -895,7 +902,7 @@ function renderCards(){
       +'<span class="enum">#'+('0'+(gi+1)).slice(-2)+'</span>'
       +'<span class="ebadges">'+chkHTML(gi,r)+actHTML(gi,r)
       +(isLido(r)?'<span class="selo">LIDO</span>':'')
-      +(urgT(r)?urgT(r):'')+'<span class="pri '+priCls(s)+'">'+priTxt(s)+'</span><span class="sc2" style="background:'+scCor(s)+'">SCORE '+s+'</span></span></div>'
+      +(urgT(r)?urgT(r):'')+'<span class="pri '+priCls(s)+'">'+priTxt(s)+'</span><span class="sc2" style="background:'+scCor(s)+'">SCORE '+s+'</span>'+statusBadge(r)+'</span></div>'
       +'<div class="ebody">'
       +'<div class="eobj">'+esc(g(r,'OBJETO')).slice(0,200)+nv+'</div>'
       +'<div class="ever"><b>Leitura automatica</b>'+esc(veredito(r))+'</div>'
@@ -1094,7 +1101,7 @@ document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('cli
 });});
 $('hbusca').addEventListener('input',renderHist);$('hmes').addEventListener('change',renderHist);
 if($('pbusca'))$('pbusca').addEventListener('input',renderPrecos);
-['busca','fuf','ffonte','fmod','fsit','fvalor','fkm'].forEach(function(i){$(i).addEventListener('input',aplicar);$(i).addEventListener('change',aplicar);});
+['busca','fuf','ffonte','fmod','fsit','fstatus','fvalor','fkm'].forEach(function(i){if($(i)){$(i).addEventListener('input',aplicar);$(i).addEventListener('change',aplicar);}});
 document.querySelectorAll('thead th[data-c]').forEach(function(th){th.addEventListener('click',function(){var c=th.getAttribute('data-c');if(ordCol===c)ordDir*=-1;else{ordCol=c;ordDir=(c==='km'?1:-1);}pg=0;ordenar();render();});});
 $('mTab').addEventListener('click',function(){modo='tab';$('mTab').classList.add('on');$('mCard').classList.remove('on');pg=0;render();});
 $('mCard').addEventListener('click',function(){modo='card';$('mCard').classList.add('on');$('mTab').classList.remove('on');pg=0;render();});
@@ -1440,6 +1447,52 @@ def gerar_historico_json():
     return len(lista)
 
 
+def sync_acompanhamento(boletim):
+    """FECHAR O LOOP (conselho 2026-07-04): aba 'Acompanhamento' onde o TIME preenche
+    STATUS + RESPONSAVEL na propria planilha (ferramenta que ja usam) e o site MOSTRA.
+    UNIAO: acrescenta os editais do boletim (por NUMERO), NUNCA apaga marcacao existente.
+    Retorna {numero: {status, responsavel}} pro site exibir. Falha graciosa."""
+    STATUS_VALIDOS = 'Novo, Analisando, Vou dar lance, Ganhamos, Perdemos, Descartado'
+    mapa = {}
+    try:
+        creds = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
+        gc = gspread.service_account(filename=creds)
+        sh = gc.open_by_key(SHEET_ID)
+        try:
+            ws = sh.worksheet('Acompanhamento')
+            vals = ws.get_all_values()
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title='Acompanhamento', rows=2000, cols=6)
+            vals = []
+        existentes = {}
+        for row in vals[1:]:
+            r = (list(row) + [''] * 6)[:6]
+            num = r[0].strip()
+            if not num:
+                continue
+            existentes[num] = r
+            mapa[num] = {'status': r[4].strip(), 'responsavel': r[5].strip()}
+        novos = 0
+        for e in boletim:
+            num = str(e.get('NUMERO', '')).strip()
+            if not num or num in existentes:
+                continue
+            existentes[num] = [num, e.get('MUNICIPIO', ''), e.get('ORGAO', ''),
+                               (e.get('OBJETO', '') or '')[:120], '', '']
+            mapa[num] = {'status': '', 'responsavel': ''}
+            novos += 1
+        if novos or len(vals) < 1:
+            hdr = ['NUMERO', 'MUNICIPIO', 'ORGAO', 'OBJETO',
+                   'STATUS (%s)' % STATUS_VALIDOS, 'RESPONSAVEL']
+            linhas = [hdr] + [existentes[k] for k in sorted(existentes)]
+            ws.clear()
+            ws.update(linhas, 'A1')
+        print('  Acompanhamento: %d editais na aba (%d novos p/ o time marcar)' % (len(existentes), novos))
+    except Exception as e:
+        print('  Acompanhamento indisponivel: %s' % repr(e)[:80])
+    return mapa
+
+
 def main():
     os.makedirs(DOCS, exist_ok=True)
     open(os.path.join(DOCS, '.nojekyll'), 'w').close()
@@ -1452,6 +1505,16 @@ def main():
     print('Lidos %d editais da aba %s' % (len(novos), ABA))
 
     todos, add = merge_historico(novos, hoje)
+
+    # FECHAR O LOOP: status/responsavel que o time marca na aba Acompanhamento -> pro site
+    mapa_ac = sync_acompanhamento(novos)
+    for r in todos:
+        st = mapa_ac.get(str(r.get('NUMERO', '')).strip())
+        if st:
+            if st['status']:
+                r['STATUS'] = st['status']
+            if st['responsavel']:
+                r['RESPONSAVEL'] = st['responsavel']
 
     # Gemini (opcional, blindado): so reescreve o veredito se a key existir; falha graciosa
     if not _GEM['off']:
