@@ -258,50 +258,80 @@ def _prazo(segundos):
     return lambda: time.monotonic() < fim
 
 # ---------- 1) PNCP ----------
+# A consulta do PNCP mata a conexao (~83s) quando o payload e grande (14d x UF numa tacada).
+# Solucao: quebrar em JANELAS de 7 dias (payload menor COMPLETA) + retry de throttle
+# ('pagina vazia com totalRegistros>0' = throttle, nao fim dos dados -- licao do comparativo.py).
+PNCP_TIMEOUT_S = float(os.environ.get('PNCP_TIMEOUT_S', '40'))
+PNCP_JANELA_DIAS = int(os.environ.get('PNCP_JANELA_DIAS', '7'))
+
 def pncp_get(url):
-    for i in range(3):
-        try: r = requests.get(url, timeout=20, headers=UA)
-        except Exception: time.sleep(1.5*(i+1)); continue
-        if r.status_code == 204: return {'data': [], 'totalPaginas': 0}
-        if r.status_code != 200: time.sleep(1.5*(i+1)); continue
-        try: j = r.json()
-        except Exception: time.sleep(1.5*(i+1)); continue
+    """1 pagina com retry. Trata timeout/pagina-de-erro e throttle (vazio c/ totalRegistros>0)."""
+    last = None
+    for att in range(5):
+        try:
+            r = requests.get(url, timeout=PNCP_TIMEOUT_S, headers=UA)
+        except Exception:
+            time.sleep(1.5 * (att + 1)); continue
+        if r.status_code == 204:
+            return {'data': [], 'totalRegistros': 0, 'totalPaginas': 0}
+        if r.status_code != 200:
+            time.sleep(1.5 * (att + 1)); continue
+        try:
+            j = r.json()
+        except Exception:                      # sob carga o PNCP responde HTML de erro (nao-JSON)
+            time.sleep(1.8 * (att + 1)); continue
+        last = j
         if not (j.get('data') or []) and (j.get('totalRegistros') or 0) > 0:
-            time.sleep(1.8*(i+1)); continue
+            time.sleep(1.8 * (att + 1)); continue   # throttle: ha registros, mas a pagina veio vazia
         return j
-    return None
+    return last
+
+def _janelas_pncp(dias_chunk):
+    """Quebra [ini..hoje] em sub-janelas de N dias, sem sobreposicao (payload menor)."""
+    js, fim = [], hoje
+    while fim >= ini:
+        comeco = max(ini, fim - datetime.timedelta(days=dias_chunk - 1))
+        js.append((comeco, fim))
+        fim = comeco - datetime.timedelta(days=1)
+    return js
+
 def coleta_pncp():
     n = 0
     ok_tempo = _prazo(PNCP_BUDGET_S)
+    seen = set()
     for uf in UFS:
         if not ok_tempo(): print("  PNCP: orcamento de tempo esgotado"); break
-        pag, tot, ok = 1, 1, True
-        while pag <= tot and pag <= 80:
+        uf_falhou = False
+        for (d_ini, d_fim) in _janelas_pncp(PNCP_JANELA_DIAS):
             if not ok_tempo(): break
-            url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
-                   '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
-                   % (ini.strftime('%Y%m%d'), hoje.strftime('%Y%m%d'), uf, pag))
-            j = pncp_get(url)
-            if j is None: ok = False; break          # falhou de vez -> integra do UF quebrou
-            tot = j.get('totalPaginas') or tot
-            data = j.get('data') or []
-            for d in data:
-                if not rel(d.get('objetoCompra')): continue
-                uo = d.get('unidadeOrgao') or {}; oe = d.get('orgaoEntidade') or {}
-                registros.append({'fonte': 'PNCP', 'uf': uo.get('ufSigla', uf), 'municipio': uo.get('municipioNome', ''),
-                                  'orgao': oe.get('razaoSocial', ''), 'objeto': (d.get('objetoCompra') or '')[:300],
-                                  'data_sessao': iso(d.get('dataEncerramentoProposta') or d.get('dataAberturaProposta')),
-                                  'data_pub': iso(d.get('dataPublicacaoPncp')), 'numero': d.get('numeroControlePNCP', ''),
-                                  'link': 'https://pncp.gov.br/app/editais',
-                                  'valor': d.get('valorTotalEstimado') or '',
-                                  'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
-                                  'uid': 'PNCP:' + str(d.get('numeroControlePNCP') or '')}); n += 1
-            if not data and pag < tot:
-                time.sleep(4); data = (pncp_get(url) or {}).get('data') or []
-                if not data: ok = False; break  # retry unico falhou = throttle/truncou
-            if not data: break
-            pag += 1; time.sleep(0.3)
-        if not ok: PNCP_TRUNC.append(uf)
+            pag, tot = 1, 1
+            while pag <= tot and pag <= 40:
+                if not ok_tempo(): break
+                url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
+                       '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
+                       % (d_ini.strftime('%Y%m%d'), d_fim.strftime('%Y%m%d'), uf, pag))
+                j = pncp_get(url)
+                if j is None: uf_falhou = True; break     # janela quebrou de vez
+                tot = j.get('totalPaginas') or tot
+                data = j.get('data') or []
+                for d in data:
+                    nc = str(d.get('numeroControlePNCP') or '')
+                    if nc and nc in seen: continue
+                    if nc: seen.add(nc)
+                    if not rel(d.get('objetoCompra')): continue
+                    uo = d.get('unidadeOrgao') or {}; oe = d.get('orgaoEntidade') or {}
+                    registros.append({'fonte': 'PNCP', 'uf': uo.get('ufSigla', uf), 'municipio': uo.get('municipioNome', ''),
+                                      'orgao': oe.get('razaoSocial', ''), 'objeto': (d.get('objetoCompra') or '')[:300],
+                                      'data_sessao': iso(d.get('dataEncerramentoProposta') or d.get('dataAberturaProposta')),
+                                      'data_pub': iso(d.get('dataPublicacaoPncp')), 'numero': nc,
+                                      'link': 'https://pncp.gov.br/app/editais',
+                                      'valor': d.get('valorTotalEstimado') or '',
+                                      'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
+                                      'uid': 'PNCP:' + nc}); n += 1
+                if not data: break
+                pag += 1; time.sleep(0.3)
+            time.sleep(0.2)
+        if uf_falhou: PNCP_TRUNC.append(uf)   # alguma janela falhou -> dados podem estar incompletos
         time.sleep(0.3)
     return n
 

@@ -479,6 +479,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .resumoia{background:#FFF7E6;border:1px solid #F0D9A8;border-left:4px solid var(--accent);border-radius:8px;padding:9px 12px;margin:8px 0}
   .resumoia b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#A9781F;margin-bottom:4px;font-family:var(--disp)}
   .resumoia .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
+  .orgbox{background:#EAF5EC;border:1px solid #BFE3C6;border-left:4px solid var(--ok);border-radius:8px;padding:9px 12px;margin:8px 0}
+  .orgbox b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#15803D;margin-bottom:4px;font-family:var(--disp)}
+  .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -500,6 +503,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   @keyframes r{to{transform:rotate(360deg)}}#load p{margin-top:13px;color:var(--muted);font-family:var(--disp);font-size:.78rem;letter-spacing:.04em}
   .foot{color:var(--muted);font-size:.73rem;text-align:center;margin-top:22px}
   @media(max-width:980px){.cards{grid-template-columns:repeat(2,1fr)}.graficos,.destaque,.ecards{grid-template-columns:1fr}.obj{max-width:none}.det-box{grid-template-columns:1fr}}
+  @media(max-width:600px){
+    .wrap{padding:12px 12px 44px}
+    .hbar{flex-direction:column;align-items:flex-start;gap:6px;padding:14px 16px}
+    .hbar .ti{font-size:1rem}.updated{text-align:left}
+    .cards{grid-template-columns:1fr 1fr;gap:10px}
+    .tabbar{gap:6px}.tabbtn{padding:9px 13px;font-size:.66rem}
+    .filtros{flex-direction:column}.fcol{width:100%}
+    table{font-size:.78rem}.org{max-width:130px}.obj{max-width:150px}
+    .hgrid,.graficos,#s-hist .graficos{grid-template-columns:1fr}
+    .card .val{font-size:1.35rem}
+  }
 </style>
 </head>
 <body>
@@ -509,7 +523,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="hbar">
       <div>
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
-        <div class="s">Rastreador de licitacoes publicas - concreto &amp; brita - PNCP, Diario Oficial e Licitar Digital</div>
+        <div class="s">Radar de licitacoes de concreto &amp; brita (Pregao Eletronico) + precificacao por orgao · fontes: PNCP, Diario Oficial e Licitar Digital</div>
       </div>
       <div class="updated">Ultima varredura<br><b>{{ATUALIZADO}}</b></div>
     </div>
@@ -521,8 +535,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <button class="tabbtn" data-t="editais">Boletim</button>
       <button class="tabbtn" data-t="mapa">Mapa</button>
       <button class="tabbtn" data-t="hist">Historico</button>
-      <button class="tabbtn" data-t="analise">Analise</button>
-      <button class="tabbtn" data-t="diario">Diario</button>
+      <button class="tabbtn" data-t="analise">Precos</button>
     </div>
 
     <div class="sec on" id="s-geral">
@@ -636,7 +649,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <div class="sec" id="s-analise">
       <div class="panel">
-        <div class="clhead"><span class="ht">Analise dos editais</span><span class="hs">resumo por IA · leitura automatica, pode conter erros — confira o edital</span></div>
+        <div class="clhead"><span class="ht">Precos por orgao</span><span class="hs">o R$/m3 que ja praticamos com cada prefeitura — referencia de lance</span></div>
+        <div class="filtros"><div class="fcol" style="flex:1"><label>Buscar orgao / municipio</label><input id="pbusca" placeholder="ex: Muriae, Itaperuna, Macae..."></div></div>
+        <div class="count" id="pcount"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Orgao / municipio</th><th>Pregoes</th><th>R$/m3 (faixa)</th><th>Mediana</th><th>Volume</th><th>Ultimo</th></tr></thead>
+          <tbody id="precosbody"></tbody></table></div>
+        <div class="foot" style="margin-top:6px">Referencia do historico de pregoes da Concrelagos — confira sempre o edital atual.</div>
+      </div>
+      <div class="panel" id="analiseiapanel" style="margin-top:14px;display:none">
+        <div class="clhead"><span class="ht">Resumo de editais (IA)</span><span class="hs">leitura automatica, pode conter erros — confira o edital</span></div>
         <div id="analiselist"></div>
       </div>
     </div>
@@ -648,7 +670,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="foot">Concrelagos - Equipe Juridica - dados publicos (PNCP / Diario Oficial) - atualizado 4x/dia (4h, 7h, 13h, 17h)</div>
+    <div class="foot">
+      <b>Concrelagos Concreto S/A · Equipe Juridica</b> — uso interno.<br>
+      Dados publicos (PNCP · Diario Oficial · Licitar Digital), so Pregao Eletronico, atualizado varias vezes ao dia.
+      Ferramenta de apoio: leitura automatica, <b>confira sempre o edital na fonte oficial</b> antes de decidir.
+    </div>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -804,7 +830,7 @@ function destaque(){
 function resumoHTML(r){var s=g(r,'RESUMO_IA');if(!s)return '';return '<div class="resumoia"><b>Resumo do edital · leitura automatica (IA) — pode conter erros, confira o edital</b><div class="rtxt">'+esc(s).replace(/\n/g,'<br>')+'</div></div>';}
 function linDet(r){
   var d=diasAte(r),v=valNum(r);
-  return resumoHTML(r)+'<div class="det-box"><div>'
+  return resumoHTML(r)+precoOrgaoHTML(r)+'<div class="det-box"><div>'
     +'<div class="dl">Objeto completo</div><div class="dv">'+esc(g(r,'OBJETO'))+'</div>'
     +'<div class="dl">Orgao</div><div class="dv">'+esc(g(r,'ORGAO'))+'</div></div><div>'
     +'<div class="dl">Valor estimado</div><div class="dv">'+fmtBRL(v)+'</div>'
@@ -877,7 +903,7 @@ function renderCards(){
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'
-      +resumoHTML(r)
+      +resumoHTML(r)+precoOrgaoHTML(r)
       +'<div class="dd"><b>Objeto:</b> '+esc(g(r,'OBJETO'))+'</div>'
       +'<div class="dd"><b>Modalidade:</b> '+(esc(g(r,'MODALIDADE'))||'-')+' · <b>Nº:</b> '+(esc(g(r,'NUMERO'))||'-')+'</div>'
       +'<div class="dd"><b>Prazo:</b> '+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+' · <b>Publicado:</b> '+(esc(g(r,'PUBLICADO'))||'-')+'</div>'
@@ -969,11 +995,25 @@ function exportarCSV(){
 function popularMes(){var ms={};DADOS.forEach(function(r){var p=g(r,'DATA SESSAO').split('/');if(p.length===3)ms[p[2]+'-'+p[1]]=1;});Object.keys(ms).sort().reverse().forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m.split('-')[1]+'/'+m.split('-')[0];$('hmes').appendChild(o);});}
 function fnum(n){return (Math.round(n)||0).toLocaleString('pt-BR');}
 function fcomp(n){n=n||0;if(n>=1e9)return (n/1e9).toFixed(1).replace('.',',')+' bi';if(n>=1e6)return (n/1e6).toFixed(1).replace('.',',')+' mi';if(n>=1e3)return Math.round(n/1e3)+' mil';return String(Math.round(n));}
-var HIST=null,HISTfeito=false,CHH={};
-function renderHistBI(){
-  if(HISTfeito)return;HISTfeito=true;
+var HIST=null,HISTrend=false,PRECOS_ORGAO={},CHH={};
+function carregaHist(cb){                 // fetch unico do historico.json (BI + preco-por-orgao)
+  if(HIST){if(cb)cb();return;}
   fetch('historico.json?v='+Date.now()).then(function(r){return r.ok?r.json():null;}).then(function(h){
-    if(!h)return;HIST=h;
+    if(h){HIST=h;PRECOS_ORGAO=h.precos_por_orgao||{};}
+    if(cb)cb();
+  }).catch(function(){if(cb)cb();});
+}
+function mnorm(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();}
+function precoOrgaoHTML(r){               // "ja negociamos com este orgao" (cruza MUNICIPIO do edital)
+  var mun=mnorm(g(r,'MUNICIPIO')),e=PRECOS_ORGAO[mun];
+  if(!e){var org=mnorm(g(r,'ORGAO'));for(var k in PRECOS_ORGAO){if(k.length>=4&&org.indexOf(k)>=0){e=PRECOS_ORGAO[k];break;}}}
+  if(!e)return '';
+  var faixa=e.preco_med?('R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
+  return '<div class="orgbox"><b>Já negociamos com este órgão</b><div class="rtxt">'+e.n+' pregão(ões) no histórico'+(e.ultimo_ano?' (última em '+esc(e.ultimo_ano)+')':'')+' · '+faixa+(e.volume?' · '+fcomp(e.volume)+' m³ contratados':'')+'<br><span style="color:#9CA3AF;font-size:.72rem">referência do que já praticamos — confira o edital atual</span></div></div>';
+}
+function renderHistBI(){
+  carregaHist(function(){
+    if(!HIST||HISTrend)return;HISTrend=true;var h=HIST;
     var totVol=0,totVal=0;(h.por_ano||[]).forEach(function(a){totVol+=a.volume||0;totVal+=a.valor||0;});
     $('kPreg').textContent=fnum(h.total_pregoes||0);
     $('kVol').textContent=fcomp(totVol);
@@ -987,7 +1027,7 @@ function renderHistBI(){
     $('htop').innerHTML=th||'<div style="color:#9CA3AF;padding:10px">Sem dados de pregoes.</div>';
     var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'</span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+'</span></div>';});
     $('hvencer').innerHTML=vh||'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>';
-  }).catch(function(){});
+  });
 }
 function renderHist(){
   renderHistBI();
@@ -1005,9 +1045,25 @@ function renderHist(){
   });
   $('histbody').innerHTML=h||'<tr><td colspan="8" style="padding:20px;text-align:center;color:#9CA3AF">Sem editais.</td></tr>';
 }
+function renderPrecos(){
+  carregaHist(function(){
+    var q=mnorm(($('pbusca')||{}).value||'');
+    var lst=Object.keys(PRECOS_ORGAO).map(function(k){var e=PRECOS_ORGAO[k];return {k:k,e:e};});
+    lst=lst.filter(function(o){return o.e.preco_med!=null;});
+    if(q)lst=lst.filter(function(o){return o.k.indexOf(q)>=0||mnorm(o.e.cliente).indexOf(q)>=0;});
+    lst.sort(function(a,b){return b.e.n-a.e.n;});
+    $('pcount').textContent=lst.length+' orgaos com preco no historico'+(q?' (filtro: '+q+')':'');
+    var h='';lst.slice(0,400).forEach(function(o){var e=o.e;
+      h+='<tr><td class="org" title="'+esc(e.cliente)+'">'+esc(e.cliente)+'</td><td style="text-align:center">'+e.n+'</td><td style="white-space:nowrap">R$ '+fnum(e.preco_min)+'–'+fnum(e.preco_max)+'</td><td style="white-space:nowrap"><b style="color:var(--accent-d)">R$ '+fnum(e.preco_med)+'</b></td><td style="white-space:nowrap">'+(e.volume?fcomp(e.volume)+' m3':'-')+'</td><td style="text-align:center">'+esc(e.ultimo_ano||'-')+'</td></tr>';
+    });
+    $('precosbody').innerHTML=h||'<tr><td colspan="6" style="padding:20px;text-align:center;color:#9CA3AF">Nenhum orgao encontrado.</td></tr>';
+  });
+}
 function renderAnalise(){
+  renderPrecos();
   var com=DADOS.filter(function(r){return g(r,'RESUMO_IA');});
-  if(!com.length){$('analiselist').innerHTML='<div style="color:#9CA3AF;font-size:.88rem;padding:14px;line-height:1.6">Nenhum resumo de IA gerado ainda.<br>Os resumos aparecem aqui quando o robo le o PDF do edital (editais do PNCP), com a chave Gemini dentro da cota gratuita. O veredito curto (Leitura automatica) continua em cada edital no Boletim.</div>';return;}
+  $('analiseiapanel').style.display=com.length?'block':'none';
+  if(!com.length){$('analiselist').innerHTML='';return;}
   var h='';com.forEach(function(r){
     h+='<div class="ecard" style="margin-bottom:12px"><div class="ehead"><span class="enum">'+esc(g(r,'UF'))+'</span><span class="ebadges" style="color:#fff">'+esc(g(r,'MUNICIPIO'))+' · '+esc(g(r,'DATA SESSAO'))+'</span></div><div class="ebody"><div class="eobj">'+esc(g(r,'OBJETO')).slice(0,180)+'</div>'+resumoHTML(r)+(g(r,'LINK').indexOf('http')===0?'<a class="abrir" href="'+esc(g(r,'LINK'))+'" target="_blank" rel="noopener">Abrir edital</a>':'')+'</div></div>';
   });
@@ -1032,6 +1088,7 @@ document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('cli
   else if(t==='diario')renderDiario();
 });});
 $('hbusca').addEventListener('input',renderHist);$('hmes').addEventListener('change',renderHist);
+if($('pbusca'))$('pbusca').addEventListener('input',renderPrecos);
 ['busca','fuf','ffonte','fmod','fsit','fvalor','fkm'].forEach(function(i){$(i).addEventListener('input',aplicar);$(i).addEventListener('change',aplicar);});
 document.querySelectorAll('thead th[data-c]').forEach(function(th){th.addEventListener('click',function(){var c=th.getAttribute('data-c');if(ordCol===c)ordDir*=-1;else{ordCol=c;ordDir=(c==='km'?1:-1);}pg=0;ordenar();render();});});
 $('mTab').addEventListener('click',function(){modo='tab';$('mTab').classList.add('on');$('mCard').classList.remove('on');pg=0;render();});
@@ -1054,7 +1111,7 @@ $('bcsv').addEventListener('click',exportarCSV);
 $('blimpar').addEventListener('click',function(){['busca','fuf','ffonte','fmod','fsit','fvalor'].forEach(function(i){$(i).value='';});$('fkm').value=1000;soFav=false;ocultarLidos=false;verDesc=false;SEL={};$('stLic').classList.add('on');$('stAcc').classList.remove('on');$('bocultar').classList.remove('on');$('bocultar').textContent='Ocultar lidos';$('bdesc').classList.remove('on');$('bdesc').textContent='Ver descartados';ordCol='score';ordDir=-1;if($('fordem'))$('fordem').value='score';aplicar();});
 
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();
+  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
   $('load').style.display='none';$('app').style.display='block';
   $('erro').innerHTML='<div style="background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px;border-radius:10px;margin:16px 0">Nao foi possivel carregar os dados. Recarregue a pagina.</div>';
@@ -1314,6 +1371,37 @@ def gerar_historico_json():
                         'mediana': precos[n // 2],
                         'media': round(sum(precos) / n, 2)}
 
+    # ---- PRECIFICACAO POR ORGAO (o diferencial: "ja negociamos com esta prefeitura") ----
+    # Chave = municipio extraido do nome do cliente (bate com o MUNICIPIO do edital novo).
+    def _muni_cliente(cli):
+        c = _n(cli)
+        c = re.sub(r'^(prefeitura\s+(municipal\s+)?(de\s+|do\s+|da\s+)?|municipio\s+(de\s+|do\s+|da\s+)?|'
+                   r'camara\s+(municipal\s+)?(de\s+|do\s+|da\s+)?|fundo\s+municipal.*?\s(de\s+|do\s+|da\s+)|'
+                   r'servico\s+autonomo.*?\s(de\s+|do\s+|da\s+)|saae\s+(de\s+)?|autarquia.*?\s(de\s+|do\s+|da\s+))', '', c)
+        c = re.sub(r'\s*[/-]\s*[a-z]{2}\s*$', '', c)
+        return c.strip()
+    orgao_ag = {}
+    for r in preg + ganhas:
+        mk = _muni_cliente(r['cliente'])
+        if not mk or len(mk) < 3:
+            continue
+        d = orgao_ag.setdefault(mk, {'cliente': r['cliente'], 'n': 0, 'precos': [], 'volume': 0.0, 'anos': []})
+        d['n'] += 1
+        if r['preco_unit']:
+            d['precos'].append(r['preco_unit'])
+        d['volume'] += r['volume'] or 0
+        if r['ano']:
+            d['anos'].append(r['ano'])
+    precos_por_orgao = {}
+    for mk, d in orgao_ag.items():
+        ps = sorted(d['precos'])
+        precos_por_orgao[mk] = {
+            'cliente': d['cliente'], 'n': d['n'], 'volume': round(d['volume']),
+            'preco_med': ps[len(ps) // 2] if ps else None,
+            'preco_min': ps[0] if ps else None, 'preco_max': ps[-1] if ps else None,
+            'ultimo_ano': max(d['anos']) if d['anos'] else '',
+        }
+
     # lista enxuta p/ tabela (ordena por ano desc, cliente)
     def _ord(r):
         return (r['ano'] or '0', r['cliente'])
@@ -1325,7 +1413,7 @@ def gerar_historico_json():
         'gerado': _hoje_brt(),
         'total_pregoes': len(preg), 'total_ganhas': len(ganhas), 'total_aditivos': len(adit),
         'por_ano': anos, 'top_clientes': top_cli, 'vencer_90d': vencer,
-        'preco': resumo_preco, 'registros': lista,
+        'preco': resumo_preco, 'precos_por_orgao': precos_por_orgao, 'registros': lista,
     }
     with open(os.path.join(DOCS, 'historico.json'), 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
