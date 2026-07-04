@@ -54,6 +54,14 @@ def _lixo(obj):
     return False
 
 
+def _pncp_link(numero):
+    """numeroControlePNCP 'CNPJ-1-SEQ/ANO' -> URL real do edital (testado: abre o edital)."""
+    m = re.match(r'(\d{14})-\d+-(\d+)/(\d{4})', str(numero or ''))
+    if m:
+        return 'https://pncp.gov.br/app/editais/%s/%s/%d' % (m.group(1), m.group(3), int(m.group(2)))
+    return ''
+
+
 def _base_mun():
     if _BASE_MUN:
         return _BASE_MUN
@@ -1533,6 +1541,17 @@ def main():
     todos = [r for r in todos if not _lixo(r.get('OBJETO', ''))]
     if len(todos) < antes:
         print('  Limpeza: %d falsos positivos removidos do historico' % (antes - len(todos)))
+
+    # conserta o link dos editais PNCP antigos (link generico -> URL real do edital)
+    nlink = 0
+    for r in todos:
+        if r.get('FONTE') == 'PNCP':
+            lk = _pncp_link(r.get('NUMERO', ''))
+            if lk and lk != r.get('LINK'):
+                r['LINK'] = lk
+                nlink += 1
+    if nlink:
+        print('  Links PNCP reconstruidos (edital real): %d' % nlink)
 
     # FECHAR O LOOP: status/responsavel que o time marca na aba Acompanhamento -> pro site
     mapa_ac = sync_acompanhamento(novos)
