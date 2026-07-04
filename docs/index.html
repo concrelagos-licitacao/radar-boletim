@@ -147,6 +147,7 @@
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
   .stbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:.6rem;font-weight:700;color:#fff;font-family:var(--disp);letter-spacing:.02em;margin-left:5px;vertical-align:middle}
+  .filnm{display:block;font-size:.62rem;color:#8A8F98;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -194,20 +195,23 @@
     </div>
 
     <div id="erro"></div>
+<<<<<<< Updated upstream
     <div id="frescor" data-gerado="2026-07-04T17:24:52" style="display:none"></div>
+=======
+    <div id="frescor" data-gerado="2026-07-04T17:24:29" style="display:none"></div>
+>>>>>>> Stashed changes
 
     <div class="tabbar">
       <button class="tabbtn on" data-t="geral">Dashboard</button>
       <button class="tabbtn" data-t="editais">Boletim</button>
       <button class="tabbtn" data-t="mapa">Mapa</button>
       <button class="tabbtn" data-t="hist">Historico</button>
-      <button class="tabbtn" data-t="analise">Precos</button>
     </div>
 
     <div class="sec on" id="s-geral">
       <div class="cards">
-        <div class="card"><div class="lbl">No historico</div><div class="val">42</div><div class="sub">editais acumulados</div></div>
-        <div class="card kclic" data-kpi="hoje"><div class="lbl">Novos hoje</div><div class="val">1</div><div class="sub">ver no boletim →</div></div>
+        <div class="card"><div class="lbl">No historico</div><div class="val">30</div><div class="sub">editais acumulados</div></div>
+        <div class="card kclic" data-kpi="hoje"><div class="lbl">Novos hoje</div><div class="val">0</div><div class="sub">ver no boletim →</div></div>
         <div class="card kclic" data-kpi="prox"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">ordenar por distancia →</div></div>
         <div class="card kclic" data-kpi="fav"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">ver acompanhados →</div></div>
       </div>
@@ -356,9 +360,14 @@ function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
 function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
 function kmNum(r){var n=parseFloat(g(r,'DISTANCIA KM').replace(',','.'));return isNaN(n)?null:n;}
 function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
-function valNum(r){var v=g(r,'VALOR').replace(/\./g,'').replace(',','.');var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
+function valNum(r){var v=g(r,'VALOR').trim();if(!v)return null;
+  if(v.indexOf(',')>=0){v=v.replace(/\./g,'').replace(',','.');}          // br: 3.000.000,00
+  else if((v.match(/\./g)||[]).length>1){v=v.replace(/\./g,'');}          // 3.000.000 (milhar, sem decimal)
+  // senao ponto e decimal (float do PNCP: 555181.0) -> mantem
+  var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
 function fmtBRL(n){if(n==null)return '-';if(n>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';return 'R$ '+n.toLocaleString('pt-BR',{maximumFractionDigits:0});}
 function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
+function filialTxt(r){var f=g(r,'FILIAL PROXIMA');if(!f)return '';return '<span class="filnm" title="unidade Concrelagos que atende (usina=concreto, pedreira=brita)">'+esc(f)+'</span>';}
 var STCOR={'novo':'#6B7280','analisando':'#1565C0','vou dar lance':'#C28E2C','ganhamos':'#16A34A','perdemos':'#9CA3AF','descartado':'#DC2626'};
 function statusBadge(r){var s=(g(r,'STATUS')||'').trim();if(!s)return '';var c=STCOR[s.toLowerCase()]||'#3A4149';var resp=g(r,'RESPONSAVEL');return '<span class="stbadge" style="background:'+c+'" title="acompanhamento (planilha)">'+esc(s)+(resp?' · '+esc(resp):'')+'</span>';}
 function favKey(r){return g(r,'NUMERO')||g(r,'LINK')||(g(r,'DATA SESSAO')+'|'+g(r,'ORGAO')+'|'+g(r,'OBJETO').slice(0,40));}
@@ -509,6 +518,7 @@ function linDet(r){
     +'<div class="dl">Modalidade</div><div class="dv">'+(esc(g(r,'MODALIDADE'))||'-')+'</div>'
     +'<div class="dl">Numero</div><div class="dv">'+(esc(g(r,'NUMERO'))||'-')+'</div>'
     +'<div class="dl">Prazo</div><div class="dv">'+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+'</div>'
+    +'<div class="dl">Unidade que atende</div><div class="dv">'+(esc(g(r,'FILIAL PROXIMA'))||'-')+(g(r,'DISTANCIA KM')?' · '+esc(g(r,'DISTANCIA KM'))+' km':'')+'</div>'
     +(g(r,'LINK').indexOf('http')===0?'<a class="abrir" href="'+esc(g(r,'LINK'))+'" target="_blank" rel="noopener">Abrir edital na fonte</a>':'')
     +'</div></div>';
 }
@@ -541,7 +551,7 @@ function renderTabela(){
       +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
       +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
-      +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+'</td><td>'+bt+'</td></tr>';
+      +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+filialTxt(r)+'</td><td>'+bt+'</td></tr>';
     if(abertos[gi])h+='<tr class="det"><td colspan="12">'+linDet(r)+'</td></tr>';
   });
   tb.innerHTML=h;
@@ -571,7 +581,7 @@ function renderCards(){
       +'<div><div class="k">Cidade</div><div class="v">'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</div></div>'
       +'<div><div class="k">Orgao</div><div class="v">'+esc(g(r,'ORGAO')).slice(0,46)+'</div></div>'
       +'<div><div class="k">Valor est.</div><div class="v vlr">'+fmtBRL(v)+'</div></div>'
-      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+'</div></div>'
+      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+filialTxt(r)+'</div></div>'
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'

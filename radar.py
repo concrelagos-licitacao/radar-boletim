@@ -34,7 +34,10 @@ EXCL = ("tubo de concreto", "tubos de concreto", "manilha", "aduela", "poste de 
         "artefatos de concreto", "pre-moldado", "pre moldado", "premoldado", "pre-fabricado", "pre fabricado",
         "prefabricado", "piso intertravado", "paver", "lajota", "meio-fio", "meio fio", "guia e sarjeta",
         "sarjeta", "cimento", "argamassa", "pavimentacao asfaltica", "asfalto", "cbuq", "massa asfaltica",
-        "emulsao asfaltica", "concreto asfaltico", "concreto betuminoso", "agregado miudo")
+        "emulsao asfaltica", "concreto asfaltico", "concreto betuminoso", "agregado miudo",
+        # falsos positivos observados (2026-07-04): 'agregad' de outros sentidos, servicos, saude
+        "agregadora", "agregador de", "plataforma digital", "plano de assistencia", "assistencia medica",
+        "plano de saude", "plano odontologico", "academia", "diario oficial", "comunicado", "art. 117")
 HARD_EXCL = ("asfalt", "cbuq", "betumin", "massa asfaltica", "emulsao asfaltica")  # asfalto SEMPRE fora
 def score(texto):
     t = _n(texto)
@@ -50,6 +53,12 @@ def norm(s):
     return re.sub(r'\s+', ' ', unicodedata.normalize('NFKD', str(s or '')).encode('ascii', 'ignore').decode().upper().strip())
 def iso(s):
     return str(s or '')[:10]
+def _pncp_link(nc):
+    """numeroControlePNCP 'CNPJ-1-SEQ/ANO' -> URL real do edital no portal PNCP."""
+    m = re.match(r'(\d{14})-\d+-(\d+)/(\d{4})', str(nc or ''))
+    if m:
+        return 'https://pncp.gov.br/app/editais/%s/%s/%d' % (m.group(1), m.group(3), int(m.group(2)))
+    return 'https://pncp.gov.br/app/editais'
 
 # ---------- GEO: distancia haversine ate usinas/pedreiras ----------
 HAVERSINE_AJUSTE = float(os.environ.get('HAVERSINE_AJUSTE_FATOR', '1.0'))
@@ -325,7 +334,7 @@ def coleta_pncp():
                                       'orgao': oe.get('razaoSocial', ''), 'objeto': (d.get('objetoCompra') or '')[:300],
                                       'data_sessao': iso(d.get('dataEncerramentoProposta') or d.get('dataAberturaProposta')),
                                       'data_pub': iso(d.get('dataPublicacaoPncp')), 'numero': nc,
-                                      'link': 'https://pncp.gov.br/app/editais',
+                                      'link': _pncp_link(nc),
                                       'valor': d.get('valorTotalEstimado') or '',
                                       'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
                                       'uid': 'PNCP:' + nc}); n += 1
@@ -350,7 +359,9 @@ def coleta_qd():
         for g in (r.json() or {}).get('gazettes', []):
             if (g.get('state_code') or '').upper() not in UFS: continue
             exc = ' '.join(g.get('excerpts') or [])
-            if not rel(exc): continue
+            # Querido Diario e RUIDOSO (texto integral do diario) -> exige SINAL FORTE (score 3:
+            # 'pedra britada'/'concreto usinado'...), nao so score 2, senao entra lixo administrativo.
+            if score(exc) < 3: continue
             if not re.search(r'(pregao|preg[ao]o|licita|edital|tomada de pre|aviso)', exc, re.I): continue
             obj = re.sub(r'\s+', ' ', exc)[:300]
             registros.append({'fonte': 'QUERIDO_DIARIO', 'uf': (g.get('state_code') or '').upper(), 'municipio': g.get('territory_name', ''),

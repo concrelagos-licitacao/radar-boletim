@@ -28,13 +28,30 @@ ABA = 'Boletim Licitacoes'
 DOCS = 'docs'
 DADOS_JSON = os.path.join(DOCS, 'dados.json')
 
-OMITIR = {'FILIAL PROXIMA'}
+OMITIR = set()   # antes ocultava FILIAL PROXIMA; usuario quer ver de qual filial e a distancia
 _BASE_MUN = {}
 
 
 def _n(s):
     return re.sub(r'\s+', ' ', unicodedata.normalize('NFKD', str(s or ''))
                   .encode('ascii', 'ignore').decode().lower()).strip()
+
+# Defesa em profundidade: limpa o historico ACUMULADO de falsos positivos ja gravados
+# (o radar corrige na coleta nova; isto tira o lixo antigo do site na hora).
+_LIXO = ('asfalt', 'cbuq', 'betumin', 'agregadora', 'plano de assistencia', 'assistencia medica',
+         'plano de saude', 'plano odontologico', 'academia', 'plataforma digital', 'diario oficial',
+         'comunicado de', 'art. 117', 'opere plano', 'tubo de concreto', 'manilha', 'aduela',
+         'poste de concreto', 'bloco de concreto', 'bloquete', 'artefato de concreto', 'pre-moldad',
+         'pre moldad', 'premoldad', 'pre-fabricad', 'piso intertravado', 'cimento', 'argamassa')
+_SINAL = ('concreto', 'brita', 'agregad', 'pedra brit', 'po de pedra', 'bica corrida', 'rachao',
+          'cascalho', 'seixo', 'pedrisco', 'pedra de mao', 'pedra matacao', 'britada', 'britas', 'pedras')
+def _lixo(obj):
+    t = _n(obj)
+    if any(k in t for k in _LIXO):
+        return True
+    if not any(k in t for k in _SINAL):    # sem NENHUM sinal de concreto/brita = fora do escopo
+        return True
+    return False
 
 
 def _base_mun():
@@ -487,6 +504,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
   .stbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:.6rem;font-weight:700;color:#fff;font-family:var(--disp);letter-spacing:.02em;margin-left:5px;vertical-align:middle}
+  .filnm{display:block;font-size:.62rem;color:#8A8F98;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
   .uf{display:inline-block;background:var(--primary);color:#fff;border-radius:8px;padding:2px 8px;font-size:.7rem;font-weight:600}
   .km{display:inline-block;border-radius:9px;padding:2px 8px;font-size:.7rem;font-weight:600;color:#fff}
   .km.v{background:var(--ok)}.km.a{background:#E08A00}.km.c{background:#757575}
@@ -541,7 +559,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <button class="tabbtn" data-t="editais">Boletim</button>
       <button class="tabbtn" data-t="mapa">Mapa</button>
       <button class="tabbtn" data-t="hist">Historico</button>
-      <button class="tabbtn" data-t="analise">Precos</button>
     </div>
 
     <div class="sec on" id="s-geral">
@@ -696,9 +713,14 @@ function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
 function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
 function kmNum(r){var n=parseFloat(g(r,'DISTANCIA KM').replace(',','.'));return isNaN(n)?null:n;}
 function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
-function valNum(r){var v=g(r,'VALOR').replace(/\./g,'').replace(',','.');var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
+function valNum(r){var v=g(r,'VALOR').trim();if(!v)return null;
+  if(v.indexOf(',')>=0){v=v.replace(/\./g,'').replace(',','.');}          // br: 3.000.000,00
+  else if((v.match(/\./g)||[]).length>1){v=v.replace(/\./g,'');}          // 3.000.000 (milhar, sem decimal)
+  // senao ponto e decimal (float do PNCP: 555181.0) -> mantem
+  var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
 function fmtBRL(n){if(n==null)return '-';if(n>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';return 'R$ '+n.toLocaleString('pt-BR',{maximumFractionDigits:0});}
 function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
+function filialTxt(r){var f=g(r,'FILIAL PROXIMA');if(!f)return '';return '<span class="filnm" title="unidade Concrelagos que atende (usina=concreto, pedreira=brita)">'+esc(f)+'</span>';}
 var STCOR={'novo':'#6B7280','analisando':'#1565C0','vou dar lance':'#C28E2C','ganhamos':'#16A34A','perdemos':'#9CA3AF','descartado':'#DC2626'};
 function statusBadge(r){var s=(g(r,'STATUS')||'').trim();if(!s)return '';var c=STCOR[s.toLowerCase()]||'#3A4149';var resp=g(r,'RESPONSAVEL');return '<span class="stbadge" style="background:'+c+'" title="acompanhamento (planilha)">'+esc(s)+(resp?' · '+esc(resp):'')+'</span>';}
 function favKey(r){return g(r,'NUMERO')||g(r,'LINK')||(g(r,'DATA SESSAO')+'|'+g(r,'ORGAO')+'|'+g(r,'OBJETO').slice(0,40));}
@@ -849,6 +871,7 @@ function linDet(r){
     +'<div class="dl">Modalidade</div><div class="dv">'+(esc(g(r,'MODALIDADE'))||'-')+'</div>'
     +'<div class="dl">Numero</div><div class="dv">'+(esc(g(r,'NUMERO'))||'-')+'</div>'
     +'<div class="dl">Prazo</div><div class="dv">'+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+'</div>'
+    +'<div class="dl">Unidade que atende</div><div class="dv">'+(esc(g(r,'FILIAL PROXIMA'))||'-')+(g(r,'DISTANCIA KM')?' · '+esc(g(r,'DISTANCIA KM'))+' km':'')+'</div>'
     +(g(r,'LINK').indexOf('http')===0?'<a class="abrir" href="'+esc(g(r,'LINK'))+'" target="_blank" rel="noopener">Abrir edital na fonte</a>':'')
     +'</div></div>';
 }
@@ -881,7 +904,7 @@ function renderTabela(){
       +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
       +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
-      +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+'</td><td>'+bt+'</td></tr>';
+      +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+filialTxt(r)+'</td><td>'+bt+'</td></tr>';
     if(abertos[gi])h+='<tr class="det"><td colspan="12">'+linDet(r)+'</td></tr>';
   });
   tb.innerHTML=h;
@@ -911,7 +934,7 @@ function renderCards(){
       +'<div><div class="k">Cidade</div><div class="v">'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</div></div>'
       +'<div><div class="k">Orgao</div><div class="v">'+esc(g(r,'ORGAO')).slice(0,46)+'</div></div>'
       +'<div><div class="k">Valor est.</div><div class="v vlr">'+fmtBRL(v)+'</div></div>'
-      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+'</div></div>'
+      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+filialTxt(r)+'</div></div>'
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'
@@ -1505,6 +1528,11 @@ def main():
     print('Lidos %d editais da aba %s' % (len(novos), ABA))
 
     todos, add = merge_historico(novos, hoje)
+
+    antes = len(todos)
+    todos = [r for r in todos if not _lixo(r.get('OBJETO', ''))]
+    if len(todos) < antes:
+        print('  Limpeza: %d falsos positivos removidos do historico' % (antes - len(todos)))
 
     # FECHAR O LOOP: status/responsavel que o time marca na aba Acompanhamento -> pro site
     mapa_ac = sync_acompanhamento(novos)

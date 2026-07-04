@@ -67,6 +67,7 @@ jobs:
         env:
           GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MOSTRAR_FILIAIS: '1'   # mapa mostra usinas/pedreiras (usuario pediu; site tem noindex)
         run: python gerar_site.py
 
       - name: Limpar credenciais
