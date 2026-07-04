@@ -38,6 +38,10 @@ def norm(s):
     s = unicodedata.normalize('NFKD', s or '').encode('ascii', 'ignore').decode()
     return ' '.join(s.upper().split())
 
+# Usinas Concrelagos que a base curada tinha ERRADO como 'pedreira' (puxavam brita p/ SP).
+# Pedreira REAL so nas 6 empresas (Apolo/Outeiro/Bangu/Bela Vista/Imboassica/Ipepam), N/centro RJ + ES.
+_FORCA_USINA = {norm(m) for m in ('Volta Redonda', 'Itaborai', 'Rio das Ostras', 'Italva')}
+
 # ---- mapa de apelidos: string crua normalizada -> (municipio oficial, UF) ----
 # Resolve bairros (Gardenia Azul, Itaquera...), sufixos de unidade (2, II, NOVA),
 # sufixos de estado (/MG) e nomes baguncados. UF explicita mata o homonimo.
@@ -123,6 +127,10 @@ def main():
         la, lo = _f(lat), _f(lon)
         if not mun.strip() or la is None or lo is None or abs(la) <= 0.01:
             continue
+        # correcao: usinas Concrelagos que estavam mal-classificadas como pedreira (puxavam
+        # brita p/ SP). Pedreira REAL so nas 6 empresas do RJ/ES. Ver feedback do usuario.
+        if 'pedreira' in norm(tipo) and norm(mun) in _FORCA_USINA:
+            tipo = 'usina'
         base_final.append([nome, mun, uf, la, lo, tipo])   # coord como float (numerico)
         base_keys.add((norm(mun), norm(uf), norm(tipo)))
 

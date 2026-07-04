@@ -240,7 +240,9 @@ def _enriquecer(r, filiais):
         d, f = _min_dist(coord, filiais, 'usina')
         if d is not None and d <= RAIO_USINA_KM:
             opcoes.append((d, f, 'usina'))
-    if brita:
+    # BRITA SO NO RJ (regra do usuario 2026-07-04): as pedreiras servem so o mercado do RJ.
+    # Edital de brita fora do RJ nao entra pela pedreira (se for tb concreto perto de usina, entra por ali).
+    if brita and uf.upper() == 'RJ':
         d, f = _min_dist(coord, filiais, 'pedreira')
         if d is not None and d <= RAIO_PEDREIRA_KM:
             opcoes.append((d, f, 'pedreira'))

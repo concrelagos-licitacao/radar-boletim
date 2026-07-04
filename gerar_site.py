@@ -1542,6 +1542,12 @@ def main():
     if len(todos) < antes:
         print('  Limpeza: %d falsos positivos removidos do historico' % (antes - len(todos)))
 
+    # brita SO no RJ (regra do usuario 2026-07-04): limpa o acumulado do que ja entrou fora
+    antes = len(todos)
+    todos = [r for r in todos if not (r.get('TIPO') == 'pedreira' and str(r.get('UF', '')).upper() != 'RJ')]
+    if len(todos) < antes:
+        print('  Brita fora do RJ removida do historico: %d' % (antes - len(todos)))
+
     # conserta o link dos editais PNCP antigos (link generico -> URL real do edital)
     nlink = 0
     for r in todos:
