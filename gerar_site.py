@@ -157,7 +157,7 @@ def merge_historico(novos, hoje):
 
 
 RAIO_USINA_KM = float(os.environ.get('RAIO_USINA_KM', '70'))
-RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '500'))
+RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '400'))
 
 # ---------- Rota REAL de estrada (OpenRouteService) -- SO na exibicao, nunca no raio ----------
 # Decisao do conselho (2026-07-06): linha reta (haversine) SUBESTIMA a distancia real em ate
@@ -257,14 +257,15 @@ def recalcular_distancias(todos):
         x = math.sin(d1 / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(d2 / 2) ** 2
         return 6371.0 * 2 * math.asin(math.sqrt(x))
 
-    def _mais_perto(coord, lista):
-        melhor, item = None, None
-        for f in lista:
-            d = _hav(coord, f)
-            if melhor is None or d < melhor:
-                melhor, item = d, f
-        return melhor, item
+    def _mais_pertos(coord, lista, n=3):
+        """N filiais mais proximas por linha reta -- candidatas p/ checar rota real."""
+        return sorted(((_hav(coord, f), f) for f in lista), key=lambda x: x[0])[:n]
 
+    # RAIO DE DECISAO (pedido do usuario 2026-07-06): nada > 70km REAL p/ concreto (usina),
+    # nada > 400km REAL p/ brita (pedreira). Antes o raio decidia em linha reta; agora usa a
+    # distancia de ROTA REAL quando disponivel. Testa as 3 filiais mais proximas por linha
+    # reta (candidatas) e escolhe a de MENOR rota real -- uma rodovia direta pode tornar uma
+    # filial mais distante em linha reta a mais proxima de fato por estrada.
     mantidos, n_corrigidos, n_removidos = [], 0, 0
     for r in todos:
         lat, lon = r.get('lat'), r.get('lon')
@@ -276,20 +277,30 @@ def recalcular_distancias(todos):
         if not lista:
             mantidos.append(r)
             continue
-        d, f = _mais_perto((lat, lon), lista)
-        if d is None:
-            mantidos.append(r)
-            continue
-        limite = RAIO_PEDREIRA_KM if tipo == 'pedreira' else RAIO_USINA_KM
-        if d > limite:
-            n_removidos += 1
-            continue   # coordenada da filial mudou -> agora fora do raio, nunca deveria aparecer
 
-        # raio de DECISAO fica em linha reta (d, acima) -- so a exibicao tenta virar rota real
-        km_rota = _distancia_rota_km(lat, lon, f[0], f[1])
-        nova_dist = str(km_rota if km_rota is not None else round(d, 1))
-        r['DISTANCIA_ROTA_REAL'] = km_rota is not None
-        nova_filial = '%s (%s/%s)' % (f[2], f[3], f[4])
+        candidatas = _mais_pertos((lat, lon), lista, n=3)
+        limite = RAIO_PEDREIRA_KM if tipo == 'pedreira' else RAIO_USINA_KM
+
+        melhor_real, melhor_real_f = None, None
+        for _d_reta, f in candidatas:
+            km_r = _distancia_rota_km(lat, lon, f[0], f[1])
+            if km_r is not None and (melhor_real is None or km_r < melhor_real):
+                melhor_real, melhor_real_f = km_r, f
+
+        if melhor_real is not None:
+            dist_decisao, filial_escolhida, e_real = melhor_real, melhor_real_f, True
+        else:
+            # API indisponivel p/ todas as candidatas -> fallback: decide com linha reta
+            d0, f0 = candidatas[0]
+            dist_decisao, filial_escolhida, e_real = d0, f0, False
+
+        if dist_decisao > limite:
+            n_removidos += 1
+            continue   # fora do raio real de atendimento -> nunca deveria aparecer
+
+        nova_dist = str(round(dist_decisao, 1))
+        r['DISTANCIA_ROTA_REAL'] = e_real
+        nova_filial = '%s (%s/%s)' % (filial_escolhida[2], filial_escolhida[3], filial_escolhida[4])
         if str(r.get('DISTANCIA KM', '')) != nova_dist or r.get('FILIAL PROXIMA') != nova_filial:
             n_corrigidos += 1
         r['DISTANCIA KM'] = nova_dist
@@ -298,7 +309,7 @@ def recalcular_distancias(todos):
 
     _salvar_cache_rotas()
     if n_corrigidos or n_removidos:
-        print('  Distancias recalculadas (filiais atuais): %d corrigidas, %d saem do raio'
+        print('  Distancias recalculadas (filiais atuais, raio em rota real): %d corrigidas, %d saem do raio'
               % (n_corrigidos, n_removidos))
     return mantidos, n_corrigidos, n_removidos
 
