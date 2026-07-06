@@ -17,6 +17,7 @@ import csv
 import json
 import time
 import shutil
+import math
 import unicodedata
 from datetime import datetime, timezone, timedelta
 
@@ -153,6 +154,89 @@ def merge_historico(novos, hoje):
         return '0000-00-00'
     todos.sort(key=lambda r: (_ord(r), r.get('capturado_em', '')), reverse=True)
     return todos, add
+
+
+RAIO_USINA_KM = float(os.environ.get('RAIO_USINA_KM', '70'))
+RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '500'))
+
+
+def recalcular_distancias(todos):
+    """Recalcula DISTANCIA KM / FILIAL PROXIMA de TODO o historico com as filiais ATUAIS,
+    em vez de usar a distancia CONGELADA da coleta original. Corrige bugs de coordenada de
+    filial que ja tinham entrado no historico (ex: usina 'Itaquera' tinha a coord do centro
+    de Sao Paulo em vez do bairro -> mostrava 13km de Taboao da Serra quando o real e ~31km).
+    Se a nova distancia ficar fora do raio de atendimento, o edital sai do historico (a
+    coordenada da filial mudou -> ele nunca deveria ter aparecido). Falha graciosa."""
+    try:
+        creds = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
+        gc = gspread.service_account(filename=creds)
+        vals = gc.open_by_key(SHEET_ID).worksheet('Filiais').get_all_values()
+    except Exception as e:
+        print('  recalcular_distancias: sem acesso a Filiais (%s)' % repr(e)[:60])
+        return todos, 0, 0
+
+    def _f(v):
+        try:
+            return float(str(v).replace(',', '.'))
+        except (ValueError, TypeError):
+            return None
+
+    usinas, pedreiras = [], []
+    for row in vals[1:]:
+        if len(row) < 6:
+            continue
+        nome, mun, uf, lat, lon, tipo = row[:6]
+        la, lo = _f(lat), _f(lon)
+        if la is None or lo is None:
+            continue
+        item = (la, lo, nome, mun, uf)
+        (pedreiras if 'pedreira' in _n(tipo) else usinas).append(item)
+
+    def _hav(a, b):
+        la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+        d1, d2 = la2 - la1, lo2 - lo1
+        x = math.sin(d1 / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(d2 / 2) ** 2
+        return 6371.0 * 2 * math.asin(math.sqrt(x))
+
+    def _mais_perto(coord, lista):
+        melhor, item = None, None
+        for f in lista:
+            d = _hav(coord, f)
+            if melhor is None or d < melhor:
+                melhor, item = d, f
+        return melhor, item
+
+    mantidos, n_corrigidos, n_removidos = [], 0, 0
+    for r in todos:
+        lat, lon = r.get('lat'), r.get('lon')
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            mantidos.append(r)
+            continue
+        tipo = (r.get('TIPO') or '').strip().lower()
+        lista = pedreiras if tipo == 'pedreira' else usinas
+        if not lista:
+            mantidos.append(r)
+            continue
+        d, f = _mais_perto((lat, lon), lista)
+        if d is None:
+            mantidos.append(r)
+            continue
+        limite = RAIO_PEDREIRA_KM if tipo == 'pedreira' else RAIO_USINA_KM
+        if d > limite:
+            n_removidos += 1
+            continue   # coordenada da filial mudou -> agora fora do raio, nunca deveria aparecer
+        nova_dist = str(round(d, 1))
+        nova_filial = '%s (%s/%s)' % (f[2], f[3], f[4])
+        if str(r.get('DISTANCIA KM', '')) != nova_dist or r.get('FILIAL PROXIMA') != nova_filial:
+            n_corrigidos += 1
+        r['DISTANCIA KM'] = nova_dist
+        r['FILIAL PROXIMA'] = nova_filial
+        mantidos.append(r)
+
+    if n_corrigidos or n_removidos:
+        print('  Distancias recalculadas (filiais atuais): %d corrigidas, %d saem do raio'
+              % (n_corrigidos, n_removidos))
+    return mantidos, n_corrigidos, n_removidos
 
 
 # ---------- Gemini BLINDADO (opcional): so reescreve numeros, nunca le edital ----------
@@ -1536,6 +1620,10 @@ def main():
     print('Lidos %d editais da aba %s' % (len(novos), ABA))
 
     todos, add = merge_historico(novos, hoje)
+
+    # recalcula distancia/filial com as coords ATUAIS (corrige bug de coord de filial
+    # que ja tinha entrado congelado no historico -- ver feedback do usuario 2026-07-06)
+    todos, _ndist, _nfora = recalcular_distancias(todos)
 
     antes = len(todos)
     todos = [r for r in todos if not _lixo(r.get('OBJETO', ''))]

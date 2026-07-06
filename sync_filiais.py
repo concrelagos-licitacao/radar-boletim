@@ -42,6 +42,19 @@ def norm(s):
 # Pedreira REAL so nas 6 empresas (Apolo/Outeiro/Bangu/Bela Vista/Imboassica/Ipepam), N/centro RJ + ES.
 _FORCA_USINA = {norm(m) for m in ('Volta Redonda', 'Itaborai', 'Rio das Ostras', 'Italva')}
 
+# Coordenadas REAIS de bairro (bug corrigido 2026-07-06): o ALIAS abaixo mapeia bairro ->
+# MUNICIPIO inteiro so pra achar a UF, mas a coordenada usada era a do municipio (centro/sede),
+# que fica longe do bairro real -- gerava distancia errada (ex: usina "Itaquera" aparecia a
+# 13km de Taboao da Serra, quando a distancia real do bairro Itaquera e >30km). Estas coords
+# sao do bairro especifico, nao do centro da cidade.
+_COORD_BAIRRO = {
+    'ITAQUERA': (-23.5378, -46.4587),          # zona leste de SP (Shopping Metro Itaquera)
+    'BANGU': (-22.8791, -43.4655),             # zona oeste do Rio
+    'GARDENIA AZUL': (-22.9497, -43.3517),     # Jacarepagua, zona oeste do Rio
+    'SANTA CRUZ': (-22.9161, -43.6825),        # zona oeste do Rio (NAO Santa Cruz/RN)
+    'TAQUARA': (-22.9280, -43.3639),           # Jacarepagua, zona oeste do Rio
+}
+
 # ---- mapa de apelidos: string crua normalizada -> (municipio oficial, UF) ----
 # Resolve bairros (Gardenia Azul, Itaquera...), sufixos de unidade (2, II, NOVA),
 # sufixos de estado (/MG) e nomes baguncados. UF explicita mata o homonimo.
@@ -131,6 +144,10 @@ def main():
         # brita p/ SP). Pedreira REAL so nas 6 empresas do RJ/ES. Ver feedback do usuario.
         if 'pedreira' in norm(tipo) and norm(mun) in _FORCA_USINA:
             tipo = 'usina'
+        # correcao de coordenada de bairro (linha JA existente na base) -- "uniao nunca remove"
+        # preservaria o erro pra sempre sem isto; aplica mesmo em linha antiga.
+        if norm(nome) in _COORD_BAIRRO:
+            la, lo = _COORD_BAIRRO[norm(nome)]
         base_final.append([nome, mun, uf, la, lo, tipo])   # coord como float (numerico)
         base_keys.add((norm(mun), norm(uf), norm(tipo)))
 
@@ -171,16 +188,20 @@ def main():
         vistos.add(key)
         total_entrada += 1
 
-        # resolve coord: cache -> csv -> pendente
+        # resolve coord: bairro conhecido (mais preciso) -> cache -> csv -> pendente
         coord = None; origem = ''
-        if norm(uf):
+        if nraw in _COORD_BAIRRO:
+            coord = _COORD_BAIRRO[nraw]; origem = 'bairro'
+        elif norm(uf):
             if (norm(mun_of), norm(uf)) in cache:
                 lat, lon, _ = cache[(norm(mun_of), norm(uf))]; coord = (lat, lon); origem = 'cache'
             elif (norm(mun_of), norm(uf)) in csv_coord:
                 lat, lon = csv_coord[(norm(mun_of), norm(uf))]; coord = (lat, lon); origem = 'csv'
 
         if coord:
-            nome_fil = '%s%s' % (mun_of, '' if tipo == 'usina' else ' (pedreira)')
+            # nome do bairro (mais especifico) se veio de _COORD_BAIRRO, senao o municipio
+            base_nome = mun_raw.strip().title() if origem == 'bairro' else mun_of
+            nome_fil = '%s%s' % (base_nome, '' if tipo == 'usina' else ' (pedreira)')
             row = [nome_fil, mun_of, uf, coord[0], coord[1], tipo]
             filiais.append(row)
             if key not in base_keys:      # so conta como NOVO se ainda nao existe na base
