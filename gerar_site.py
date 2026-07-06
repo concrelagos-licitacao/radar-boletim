@@ -209,7 +209,10 @@ def _distancia_rota_km(lat1, lon1, lat2, lon2):
             timeout=8)
         if r.status_code != 200:
             return None
-        km = round(r.json()['routes'][0]['summary']['distance'] / 1000.0, 1)
+        j = r.json()
+        # resposta padrao do ORS e GeoJSON (features[].properties.segments[].distance em metros)
+        metros = j['features'][0]['properties']['segments'][0]['distance']
+        km = round(metros / 1000.0, 1)
         cache[chave] = km
         return km
     except Exception:
