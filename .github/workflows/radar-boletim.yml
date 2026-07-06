@@ -67,6 +67,7 @@ jobs:
         env:
           GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}   # OpenRouteService (rota real na exibicao; sem key = linha reta)
           MOSTRAR_FILIAIS: '1'   # mapa mostra usinas/pedreiras (usuario pediu; site tem noindex)
         run: python gerar_site.py
 
@@ -79,4 +80,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(site): atualiza boletins [skip ci]"
-          file_pattern: 'docs/'
+          file_pattern: 'docs/ cache_rotas.json'

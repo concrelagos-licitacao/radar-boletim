@@ -159,6 +159,62 @@ def merge_historico(novos, hoje):
 RAIO_USINA_KM = float(os.environ.get('RAIO_USINA_KM', '70'))
 RAIO_PEDREIRA_KM = float(os.environ.get('RAIO_PEDREIRA_KM', '500'))
 
+# ---------- Rota REAL de estrada (OpenRouteService) -- SO na exibicao, nunca no raio ----------
+# Decisao do conselho (2026-07-06): linha reta (haversine) SUBESTIMA a distancia real em ate
+# ~2.8x em area metropolitana (Rodoanel/transito). Mas API externa e mais um ponto de falha
+# (licao do PNCP instavel) -- entao: (1) o RAIO DE DECISAO continua em linha reta (nao muda
+# cobertura silenciosamente); (2) so o NUMERO EXIBIDO tenta virar rota real; (3) cache em
+# arquivo commitado no repo (senao estoura a cota de 2500 req/dia como aconteceu com o PNCP);
+# (4) fallback gracioso total -- sem ORS_API_KEY ou se a API falhar, mantem linha reta.
+ORS_API_KEY = os.environ.get('ORS_API_KEY', '').strip()
+CACHE_ROTAS_PATH = 'cache_rotas.json'
+_CACHE_ROTAS = None
+
+
+def _carregar_cache_rotas():
+    global _CACHE_ROTAS
+    if _CACHE_ROTAS is not None:
+        return _CACHE_ROTAS
+    try:
+        with open(CACHE_ROTAS_PATH, encoding='utf-8') as f:
+            _CACHE_ROTAS = json.load(f)
+    except Exception:
+        _CACHE_ROTAS = {}
+    return _CACHE_ROTAS
+
+
+def _salvar_cache_rotas():
+    if _CACHE_ROTAS is None:
+        return
+    try:
+        with open(CACHE_ROTAS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(_CACHE_ROTAS, f, ensure_ascii=False, separators=(',', ':'))
+    except Exception:
+        pass
+
+
+def _distancia_rota_km(lat1, lon1, lat2, lon2):
+    """Distancia de ROTA (estrada) via OpenRouteService, com cache persistente. Retorna None
+    (fallback pro chamador usar linha reta) se sem key, sem rede, erro, ou fora de cota."""
+    if not ORS_API_KEY:
+        return None
+    cache = _carregar_cache_rotas()
+    chave = '%.4f,%.4f|%.4f,%.4f' % (lat1, lon1, lat2, lon2)
+    if chave in cache:
+        return cache[chave]
+    try:
+        r = requests.get(
+            'https://api.openrouteservice.org/v2/directions/driving-car',
+            params={'api_key': ORS_API_KEY, 'start': '%s,%s' % (lon1, lat1), 'end': '%s,%s' % (lon2, lat2)},
+            timeout=8)
+        if r.status_code != 200:
+            return None
+        km = round(r.json()['routes'][0]['summary']['distance'] / 1000.0, 1)
+        cache[chave] = km
+        return km
+    except Exception:
+        return None
+
 
 def recalcular_distancias(todos):
     """Recalcula DISTANCIA KM / FILIAL PROXIMA de TODO o historico com as filiais ATUAIS,
@@ -225,7 +281,11 @@ def recalcular_distancias(todos):
         if d > limite:
             n_removidos += 1
             continue   # coordenada da filial mudou -> agora fora do raio, nunca deveria aparecer
-        nova_dist = str(round(d, 1))
+
+        # raio de DECISAO fica em linha reta (d, acima) -- so a exibicao tenta virar rota real
+        km_rota = _distancia_rota_km(lat, lon, f[0], f[1])
+        nova_dist = str(km_rota if km_rota is not None else round(d, 1))
+        r['DISTANCIA_ROTA_REAL'] = km_rota is not None
         nova_filial = '%s (%s/%s)' % (f[2], f[3], f[4])
         if str(r.get('DISTANCIA KM', '')) != nova_dist or r.get('FILIAL PROXIMA') != nova_filial:
             n_corrigidos += 1
@@ -233,6 +293,7 @@ def recalcular_distancias(todos):
         r['FILIAL PROXIMA'] = nova_filial
         mantidos.append(r)
 
+    _salvar_cache_rotas()
     if n_corrigidos or n_removidos:
         print('  Distancias recalculadas (filiais atuais): %d corrigidas, %d saem do raio'
               % (n_corrigidos, n_removidos))
@@ -789,7 +850,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="foot">
       <b>Concrelagos Concreto S/A · Equipe Juridica</b> — uso interno.<br>
       Dados publicos (PNCP · Diario Oficial · Licitar Digital), so Pregao Eletronico, atualizado varias vezes ao dia.
-      Ferramenta de apoio: leitura automatica, <b>confira sempre o edital na fonte oficial</b> antes de decidir.
+      Ferramenta de apoio: leitura automatica, <b>confira sempre o edital na fonte oficial</b> antes de decidir.<br>
+      Distancia: km sem * e rota real de estrada; km com * e estimativa em linha reta (rota real pode ser maior).
     </div>
   </div>
 
@@ -805,6 +867,7 @@ function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
 function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
 function kmNum(r){var n=parseFloat(g(r,'DISTANCIA KM').replace(',','.'));return isNaN(n)?null:n;}
 function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
+function kmTip(r){return r['DISTANCIA_ROTA_REAL']?'distancia de rota (estrada)':'estimativa em linha reta -- rota real pode ser maior';}
 function valNum(r){var v=g(r,'VALOR').trim();if(!v)return null;
   if(v.indexOf(',')>=0){v=v.replace(/\./g,'').replace(',','.');}          // br: 3.000.000,00
   else if((v.match(/\./g)||[]).length>1){v=v.replace(/\./g,'');}          // 3.000.000 (milhar, sem decimal)
@@ -984,7 +1047,7 @@ function renderTabela(){
   if(!VIS.length){tb.innerHTML='<tr><td colspan="12" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';return;}
   var h='';
   page.forEach(function(r,idx){
-    var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>');
+    var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'" title="'+esc(kmTip(r))+'">'+Math.round(km)+' km'+(r['DISTANCIA_ROTA_REAL']?'':'*')+'</span>');
     var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir</a>':'-';
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
     if(agrupa){var dia=g(r,'DATA SESSAO');if(dia!==dAtual){dAtual=dia;h+='<tr><td colspan="12" style="padding:0;border:0">'+diaHead(dia)+'</td></tr>';}}
@@ -1026,7 +1089,7 @@ function renderCards(){
       +'<div><div class="k">Cidade</div><div class="v">'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</div></div>'
       +'<div><div class="k">Orgao</div><div class="v">'+esc(g(r,'ORGAO')).slice(0,46)+'</div></div>'
       +'<div><div class="k">Valor est.</div><div class="v vlr">'+fmtBRL(v)+'</div></div>'
-      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+filialTxt(r)+'</div></div>'
+      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'" title="'+esc(kmTip(r))+'">'+Math.round(km)+' km'+(r['DISTANCIA_ROTA_REAL']?'':'*')+'</span>')+filialTxt(r)+'</div></div>'
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'

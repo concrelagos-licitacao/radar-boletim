@@ -191,11 +191,11 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
         <div class="s">Radar de licitacoes de concreto &amp; brita (Pregao Eletronico) + precificacao por orgao · fontes: PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>06/07/2026 11:37</b></div>
+      <div class="updated">Ultima varredura<br><b>06/07/2026 11:55</b></div>
     </div>
 
     <div id="erro"></div>
-    <div id="frescor" data-gerado="2026-07-06T11:37:12" style="display:none"></div>
+    <div id="frescor" data-gerado="2026-07-06T11:55:15" style="display:none"></div>
 
     <div class="tabbar">
       <button class="tabbtn on" data-t="geral">Dashboard</button>
@@ -340,7 +340,8 @@
     <div class="foot">
       <b>Concrelagos Concreto S/A · Equipe Juridica</b> — uso interno.<br>
       Dados publicos (PNCP · Diario Oficial · Licitar Digital), so Pregao Eletronico, atualizado varias vezes ao dia.
-      Ferramenta de apoio: leitura automatica, <b>confira sempre o edital na fonte oficial</b> antes de decidir.
+      Ferramenta de apoio: leitura automatica, <b>confira sempre o edital na fonte oficial</b> antes de decidir.<br>
+      Distancia: km sem * e rota real de estrada; km com * e estimativa em linha reta (rota real pode ser maior).
     </div>
   </div>
 
@@ -356,6 +357,7 @@ function g(r,k){return (r[k]==null?'':String(r[k])).trim();}
 function parseBR(d){var p=String(d||'').split('/');if(p.length!==3)return null;var dt=new Date(+p[2],+p[1]-1,+p[0]);return isNaN(dt)?null:dt;}
 function kmNum(r){var n=parseFloat(g(r,'DISTANCIA KM').replace(',','.'));return isNaN(n)?null:n;}
 function kmCls(n){if(n==null)return 'c';if(n<=50)return 'v';if(n<=150)return 'a';return 'c';}
+function kmTip(r){return r['DISTANCIA_ROTA_REAL']?'distancia de rota (estrada)':'estimativa em linha reta -- rota real pode ser maior';}
 function valNum(r){var v=g(r,'VALOR').trim();if(!v)return null;
   if(v.indexOf(',')>=0){v=v.replace(/\./g,'').replace(',','.');}          // br: 3.000.000,00
   else if((v.match(/\./g)||[]).length>1){v=v.replace(/\./g,'');}          // 3.000.000 (milhar, sem decimal)
@@ -535,7 +537,7 @@ function renderTabela(){
   if(!VIS.length){tb.innerHTML='<tr><td colspan="12" style="padding:24px;text-align:center;color:#9CA3AF">Nenhum edital com esses filtros.</td></tr>';return;}
   var h='';
   page.forEach(function(r,idx){
-    var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>');
+    var gi=ini+idx,s=score(r),km=kmNum(r),kmh=(km==null?'-':'<span class="km '+kmCls(km)+'" title="'+esc(kmTip(r))+'">'+Math.round(km)+' km'+(r['DISTANCIA_ROTA_REAL']?'':'*')+'</span>');
     var lk=g(r,'LINK'),bt=(lk.indexOf('http')===0)?'<a class="abrir" href="'+esc(lk)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">Abrir</a>':'-';
     var nv=(g(r,'capturado_em')===HOJE)?'<span class="novo">NOVO</span>':'';
     if(agrupa){var dia=g(r,'DATA SESSAO');if(dia!==dAtual){dAtual=dia;h+='<tr><td colspan="12" style="padding:0;border:0">'+diaHead(dia)+'</td></tr>';}}
@@ -577,7 +579,7 @@ function renderCards(){
       +'<div><div class="k">Cidade</div><div class="v">'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</div></div>'
       +'<div><div class="k">Orgao</div><div class="v">'+esc(g(r,'ORGAO')).slice(0,46)+'</div></div>'
       +'<div><div class="k">Valor est.</div><div class="v vlr">'+fmtBRL(v)+'</div></div>'
-      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'">'+Math.round(km)+' km</span>')+filialTxt(r)+'</div></div>'
+      +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'" title="'+esc(kmTip(r))+'">'+Math.round(km)+' km'+(r['DISTANCIA_ROTA_REAL']?'':'*')+'</span>')+filialTxt(r)+'</div></div>'
       +'<div><div class="k">Fonte</div><div class="v">'+esc(g(r,'FONTE'))+'</div></div>'
       +'</div>'
       +'<details><summary>Ver mais informacoes</summary>'
