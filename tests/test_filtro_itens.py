@@ -10,7 +10,7 @@ import sys
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(AQUI))
-from filtro_concreto import edital_entra_por_itens, classificar_item  # noqa: E402
+from filtro_concreto import edital_entra_por_itens, classificar_item, porte_m3  # noqa: E402
 
 FIX = os.path.join(AQUI, 'fixtures')
 
@@ -31,13 +31,14 @@ def main():
     ok = True
     for arq, esperado, nota in CASOS:
         itens = carrega(arq)
-        entra, gatilho = edital_entra_por_itens(itens)
+        entra, item = edital_entra_por_itens(itens)
         marca = 'OK ' if entra == esperado else '*** FALHOU ***'
         if entra != esperado:
             ok = False
         print('[%s] %-42s entra=%-5s (esp %-5s)  %s' % (marca, arq[:42], entra, esperado, nota))
         if entra:
-            print('        gatilho: %s' % (gatilho or '')[:70])
+            desc = (item.get('descricao') if isinstance(item, dict) else str(item)) or ''
+            print('        gatilho: %s  | porte: %s' % (desc[:55], porte_m3(item) or '(sem m3)'))
     # detalhe item-a-item do caso de drenagem (prova que nenhum item passa)
     print('\n  -- itens da drenagem (todos devem dar score 0) --')
     for it in carrega('drenagem_brita_berco_FALSO_POSITIVO.json'):

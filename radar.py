@@ -10,7 +10,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 import gspread
-from filtro_concreto import edital_entra_por_itens   # classificador item-a-item (fixture-testado)
+from filtro_concreto import edital_entra_por_itens, porte_m3   # item-a-item + porte (fixture-testado)
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 UFS = ['MG', 'SP', 'RJ', 'ES', 'PR', 'BA']
@@ -371,9 +371,14 @@ def resolver_pendentes(final):
         itens = pncp_itens_lista(r.get('numero', '')); abertos += 1
         if itens is None:
             descartados += 1; continue                      # PNCP falhou -> fallback = fora
-        entra, gatilho = edital_entra_por_itens(itens)
+        entra, item = edital_entra_por_itens(itens)
         if entra:
-            r['objeto'] = (r.get('objeto', '') + ' | item: ' + (gatilho or ''))[:300]
+            desc = (item.get('descricao') if isinstance(item, dict) else str(item)) or ''
+            desc = re.sub(r'\s+', ' ', desc).strip()[:90]      # descricoes do PNCP sao longas/repetidas
+            porte = porte_m3(item)      # '~300 m3' se for m3; '' senao. NUNCA vira R$ (teto, nao compra)
+            # porte PRIMEIRO (sinal que importa), depois a descricao curta -- cabe nos 300 chars
+            selo = (' | achado no item: %s (teto) — %s' % (porte, desc)) if porte else (' | achado no item: %s' % desc)
+            r['objeto'] = (r.get('objeto', '')[:200] + selo)[:300]
             r['via_item'] = True
             r.pop('pendente_item', None)
             mantidos.append(r); confirmados += 1

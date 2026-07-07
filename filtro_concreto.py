@@ -86,10 +86,28 @@ def classificar_item(descricao):
 
 
 def edital_entra_por_itens(itens):
-    """True + descricao do item-gatilho se ALGUM item e concreto usinado/brita PRODUTO (score>=3).
-    `itens` = lista de dicts com 'descricao' (e opcionalmente quantidade/unidade)."""
+    """True + o ITEM-GATILHO (dict completo: descricao/quantidade/unidade) se ALGUM item e
+    concreto usinado/brita PRODUTO (score>=3). O dict permite ao chamador mostrar o PORTE
+    (ex: '~300 m3') sem inventar valor. `itens` = lista de dicts com 'descricao'."""
     for it in itens or []:
         d = it.get('descricao') if isinstance(it, dict) else it
         if classificar_item(d) >= 3:
-            return True, (d or '')
+            return True, (it if isinstance(it, dict) else {'descricao': d})
     return False, None
+
+
+def porte_m3(item):
+    """String de porte a partir do item-gatilho: '~300 m3' se a unidade for m3; senao ''.
+    NUNCA inventa valor em R$ (decisao do conselho: quantidade de registro de precos e TETO,
+    nao compra); serve so como PORTE grosseiro p/ priorizar."""
+    if not isinstance(item, dict):
+        return ''
+    q = item.get('quantidade')
+    u = _n(item.get('unidadeMedida') or '')
+    try:
+        q = float(q)
+    except (TypeError, ValueError):
+        return ''
+    if q <= 0 or u not in ('m3', 'm³', 'mc', 'metro cubico', 'metros cubicos'):
+        return ''
+    return '~%s m3' % (int(q) if q == int(q) else round(q, 1))
