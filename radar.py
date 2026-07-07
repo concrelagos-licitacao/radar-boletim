@@ -10,6 +10,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 import gspread
+from filtro_concreto import edital_entra_por_itens   # classificador item-a-item (fixture-testado)
 
 SHEET_ID = '1FjmN8EDKQRcBflL7VOp7MzB6PeKNO0hcXLUUAoLbBbg'
 UFS = ['MG', 'SP', 'RJ', 'ES', 'PR', 'BA']
@@ -306,14 +307,81 @@ def _janelas_pncp(dias_chunk):
         fim = comeco - datetime.timedelta(days=1)
     return js
 
-# NOTA (backtest 2026-07-07): avaliei enriquecer objetos genericos ("OUTROS MATERIAIS DE
-# CONSUMO") abrindo o endpoint /itens do PNCP e re-scoreando. DESCARTADO: (1) os 2 supostos
-# "misses" da semana (Cajamar/Pedra Bonita) eram pre-moldado/drenagem que o filtro ja rejeita
-# certo -- 0 miss real, benefico nao comprovado; (2) teste de regressao mostrou falso positivo
-# real -- edital de drenagem lista 'brita' p/ berco de tubo e o score() casa 'brita' (KW3)
-# ANTES da exclusao 'tubo de concreto', entrando como falso concreto. Precisao e a nossa
-# vantagem sobre o ConLic (que super-lista pre-moldado); nao vale arriscar por ganho incerto.
-# Reabrir SO quando houver um miss REAL de concreto usinado escondido em objeto generico.
+# ---- ITEM-CHECK (backtest 2026-07-07, conselho): objeto e rotulo de conveniencia do municipio;
+# a decisao de fornecer e sobre a LINHA/ITEM. Pedra Bonita/MG tinha objeto "artefatos de concreto,
+# drenagem" (bate EXCL -> hoje DESCARTADO) mas item "CONCRETO USINADO BOMBEAVEL qt 300" -> miss real.
+# SEGURO POR CONSTRUCAO: so abrimos itens de editais que HOJE JA SAO DESCARTADOS pelo objeto mas sao
+# de "familia construcao" (podem esconder linha de usinado). So pode ADICIONAR um Pedra Bonita, nunca
+# quebra caso que ja funciona nem mostra falso. Roda DEPOIS da listagem + raio (budget/teto proprios),
+# so nos in-raio (punhado/dia), fallback = descartar (= comportamento de hoje). Classificacao item-a-item
+# em filtro_concreto.py (fixture-testado: Pedra Bonita ENTRA, Cajamar/drenagem-berco FORA).
+PNCP_ITENS = os.environ.get('PNCP_ITENS', '1') == '1'
+PNCP_ITENS_MAX = int(os.environ.get('PNCP_ITENS_MAX', '40'))       # teto de aberturas/rodada
+PNCP_ITENS_BUDGET_S = float(os.environ.get('PNCP_ITENS_BUDGET_S', '120'))  # tempo SEPARADO (nao rouba listagem)
+_FAMILIA_CONSTRUCAO = ("concreto", "brita", "artefato", "drenagem", "pavimenta", "galeria", "aduela",
+                       "tubo", "pedra", "agregado", "obra", "terraplen", "pluvial", "meio-fio", "meio fio",
+                       "sarjeta", "guia", "calcamento", "bloquete", "usina")
+
+def _familia_construcao(objeto):
+    """Objeto que hoje e descartado pode esconder linha de usinado? So vale abrir itens se for
+    de construcao (senao e fralda/medicina/etc -> nem toca no PNCP)."""
+    t = _n(objeto)
+    if any(e in t for e in HARD_EXCL): return False   # asfalto: nunca e nosso, nem gasta request
+    return any(f in t for f in _FAMILIA_CONSTRUCAO)
+
+def _seq_de_nc(nc):
+    m = re.match(r'(\d+)-\d+-(\d+)/(\d+)', str(nc or ''))
+    return (m.group(1), m.group(3), int(m.group(2))) if m else None
+
+def pncp_itens_lista(nc):
+    """Lista de itens de uma compra (1 request). None se falhar -> chamador faz fallback."""
+    p = _seq_de_nc(nc)
+    if not p: return None
+    cnpj, ano, seq = p
+    url = 'https://pncp.gov.br/api/pncp/v1/orgaos/%s/compras/%s/%d/itens?pagina=1&tamanhoPagina=50' % (cnpj, ano, seq)
+    for att in range(3):
+        try:
+            r = requests.get(url, timeout=PNCP_TIMEOUT_S, headers=UA)
+            if r.status_code == 200:
+                j = r.json()
+                return j if isinstance(j, list) else None
+        except Exception:
+            pass
+        time.sleep(1.2 * (att + 1))
+    return None
+
+def resolver_pendentes(final):
+    """Roda DEPOIS do raio, so nos candidatos 'pendente_item' que sobraram no raio (punhado).
+    Abre os itens e confirma se ha linha de concreto usinado/brita PRODUTO. So ADICIONA:
+    - confirmado -> mantem, enriquece o objeto com o item-gatilho (marca via_item).
+    - nao confirmado / PNCP falhou / teto/tempo estourou -> DESCARTA (= comportamento de hoje).
+    Budget e teto PROPRIOS: nunca rouba tempo da listagem (furo de carga do Contrario)."""
+    pend = [r for r in final if r.get('pendente_item')]
+    if not pend:
+        for r in final: r.pop('pendente_item', None)
+        return final, 0, 0
+    ok_tempo = _prazo(PNCP_ITENS_BUDGET_S)
+    abertos = confirmados = descartados = 0
+    mantidos = []
+    for r in final:
+        if not r.get('pendente_item'):
+            mantidos.append(r); continue
+        if abertos >= PNCP_ITENS_MAX or not ok_tempo():
+            descartados += 1; continue                      # fallback: nao deu p/ confirmar -> fora (= hoje)
+        itens = pncp_itens_lista(r.get('numero', '')); abertos += 1
+        if itens is None:
+            descartados += 1; continue                      # PNCP falhou -> fallback = fora
+        entra, gatilho = edital_entra_por_itens(itens)
+        if entra:
+            r['objeto'] = (r.get('objeto', '') + ' | item: ' + (gatilho or ''))[:300]
+            r['via_item'] = True
+            r.pop('pendente_item', None)
+            mantidos.append(r); confirmados += 1
+        else:
+            descartados += 1
+    print("  Item-check: %d itens abertos -> %d confirmados (via item), %d descartados" %
+          (abertos, confirmados, descartados))
+    return mantidos, confirmados, descartados
 
 PNCP_MAX_PAGINAS = int(os.environ.get('PNCP_MAX_PAGINAS', '60'))   # MG tem ~44 pag PE; teto 40 truncava
 RADAR_ESTADO_PATH = 'radar_estado.json'   # estado leve entre as 7 coletas/dia (committado pelo Action)
@@ -361,15 +429,21 @@ def coleta_pncp():
                     nc = str(d.get('numeroControlePNCP') or '')
                     if nc and nc in seen: continue
                     if nc: seen.add(nc)
-                    if not rel(d.get('objetoCompra')): continue
+                    objeto = d.get('objetoCompra') or ''
+                    aceito = rel(objeto)
+                    # pendente = objeto descartado hoje, MAS de familia-construcao (pode esconder
+                    # linha de usinado). So confirma abrindo os itens DEPOIS, e so se ficar no raio.
+                    pendente = (not aceito) and PNCP_ITENS and _familia_construcao(objeto)
+                    if not aceito and not pendente: continue
                     uo = d.get('unidadeOrgao') or {}; oe = d.get('orgaoEntidade') or {}
                     registros.append({'fonte': 'PNCP', 'uf': uo.get('ufSigla', uf), 'municipio': uo.get('municipioNome', ''),
-                                      'orgao': oe.get('razaoSocial', ''), 'objeto': (d.get('objetoCompra') or '')[:300],
+                                      'orgao': oe.get('razaoSocial', ''), 'objeto': objeto[:300],
                                       'data_sessao': iso(d.get('dataEncerramentoProposta') or d.get('dataAberturaProposta')),
                                       'data_pub': iso(d.get('dataPublicacaoPncp')), 'numero': nc,
                                       'link': _pncp_link(nc),
                                       'valor': d.get('valorTotalEstimado') or '',
                                       'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
+                                      'pendente_item': pendente,   # resolver_pendentes() decide depois do raio
                                       'uid': 'PNCP:' + nc}); n += 1
                 if not data: break
                 pag_ok = max(pag_ok, pag)
@@ -524,6 +598,9 @@ if filiais:
     antes = len(final)
     final = [x for x in (_enriquecer(r, filiais) for r in final) if x is not None]
     print("Regra de raio: %d dentro do raio de atendimento (%d removidos fora)" % (len(final), antes - len(final)))
+    # item-check SO nos pendentes in-raio (objeto descartado mas familia-construcao): confirma
+    # concreto usinado/brita escondido nos itens (ex: Pedra Bonita). So adiciona; fallback = fora.
+    final, _conf, _desc = resolver_pendentes(final)
 
 # ---------- grava o BOLETIM (mesma estrutura do ConLic) ----------
 final.sort(key=lambda r: (r.get('data_sessao') or '9999', r['uf']))
