@@ -36,7 +36,7 @@ def _badge_dist(km):
         return ''
 
 
-def gerar_html(rows, hoje):
+def gerar_html(rows, hoje, truncou=''):
     total = len(rows)
     por_uf = {}
     for r in rows:
@@ -47,6 +47,18 @@ def gerar_html(rows, hoje):
         f'<span style="background:{_cor(uf)};color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;margin:2px">{uf} {n}</span>'
         for uf, n in sorted(por_uf.items(), key=lambda x: -x[1])
     )
+
+    # Aviso HONESTO de cobertura incompleta: se o PNCP truncou alguma UF, a diretoria PRECISA
+    # saber que a lista pode nao estar completa naquele estado (senao 'lista curta' vira falso
+    # 'nao tem edital'). Transparencia > parecer 100%. Fica vazio quando tudo veio completo.
+    aviso_trunc = ''
+    if truncou:
+        aviso_trunc = (
+            '<tr><td style="background:#FFF3E0;border-left:4px solid #FB8C00;padding:12px 28px">'
+            '<span style="color:#E65100;font-size:13px;font-weight:bold">Cobertura parcial hoje:</span> '
+            '<span style="color:#8D6E63;font-size:13px">o PNCP nao respondeu por completo em ' + truncou +
+            '. Pode haver editais desses estados fora desta lista — confira direto no PNCP se for critico.</span>'
+            '</td></tr>')
 
     # link do e-mail vai SEMPRE pro nosso site (sempre no ar), deep-link no edital.
     # O link da fonte externa (Licitar Digital/PNCP) fica como secundario, pois abre
@@ -109,6 +121,7 @@ def gerar_html(rows, hoje):
         <div style="margin-top:8px">{badges_uf}</div>
       </td>
     </tr>
+    {aviso_trunc}
 
     <!-- TABELA -->
     <tr>
@@ -150,14 +163,27 @@ def main():
     creds_path = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
     gc = gspread.service_account(filename=creds_path)
     # head=2: a linha 1 da aba e o banner; o cabecalho real esta na linha 2
-    rows = gc.open_by_key(SHEET_ID).worksheet('Boletim Licitacoes').get_all_records(head=2)
+    sh = gc.open_by_key(SHEET_ID)
+    rows = sh.worksheet('Boletim Licitacoes').get_all_records(head=2)
 
     if not rows:
         print('Boletim vazio — e-mail nao enviado.')
         return
 
+    # ultimo TRUNCOU da aba de saude -> aviso honesto de cobertura parcial no e-mail
+    truncou = ''
+    try:
+        saude = sh.worksheet('Saude Boletim').get_all_values()
+        if len(saude) > 1:
+            hdr = saude[0]
+            ci = hdr.index('TRUNCOU') if 'TRUNCOU' in hdr else -1
+            if ci >= 0 and len(saude[-1]) > ci:
+                truncou = str(saude[-1][ci]).strip()
+    except Exception as e:
+        print('  (aviso de truncamento indisponivel: %s)' % repr(e)[:50])
+
     hoje = date.today()
-    html = gerar_html(rows, hoje)
+    html = gerar_html(rows, hoje, truncou)
     assunto = f'Boletim Licitações {hoje.strftime("%d/%m")} — {len(rows)} editais'
 
     if not EMAIL_PASS:

@@ -80,4 +80,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(site): atualiza boletins [skip ci]"
-          file_pattern: 'docs/ cache_rotas.json'
+          file_pattern: 'docs/ cache_rotas.json radar_estado.json'

@@ -306,18 +306,48 @@ def _janelas_pncp(dias_chunk):
         fim = comeco - datetime.timedelta(days=1)
     return js
 
+# NOTA (backtest 2026-07-07): avaliei enriquecer objetos genericos ("OUTROS MATERIAIS DE
+# CONSUMO") abrindo o endpoint /itens do PNCP e re-scoreando. DESCARTADO: (1) os 2 supostos
+# "misses" da semana (Cajamar/Pedra Bonita) eram pre-moldado/drenagem que o filtro ja rejeita
+# certo -- 0 miss real, benefico nao comprovado; (2) teste de regressao mostrou falso positivo
+# real -- edital de drenagem lista 'brita' p/ berco de tubo e o score() casa 'brita' (KW3)
+# ANTES da exclusao 'tubo de concreto', entrando como falso concreto. Precisao e a nossa
+# vantagem sobre o ConLic (que super-lista pre-moldado); nao vale arriscar por ganho incerto.
+# Reabrir SO quando houver um miss REAL de concreto usinado escondido em objeto generico.
+
+PNCP_MAX_PAGINAS = int(os.environ.get('PNCP_MAX_PAGINAS', '60'))   # MG tem ~44 pag PE; teto 40 truncava
+RADAR_ESTADO_PATH = 'radar_estado.json'   # estado leve entre as 7 coletas/dia (committado pelo Action)
+
+def _ufs_rotacionadas():
+    """Rotaciona a ordem das UFs a cada coleta. Se o orcamento de tempo estoura, a UF starvada
+    hoje foi a primeira ontem -> ao longo das 7 coletas/dia toda UF pega a coleta 'inteira'
+    varias vezes. Sem isso, a mesma UF (a ultima da lista) truncava sempre no mesmo lugar."""
+    try:
+        with open(RADAR_ESTADO_PATH, encoding='utf-8') as f:
+            k = int(json.load(f).get('rot', 0))
+    except Exception:
+        k = 0
+    try:
+        with open(RADAR_ESTADO_PATH, 'w', encoding='utf-8') as f:
+            json.dump({'rot': (k + 1) % len(UFS)}, f)
+    except Exception:
+        pass
+    return UFS[k % len(UFS):] + UFS[:k % len(UFS)]
+
 def coleta_pncp():
     n = 0
     ok_tempo = _prazo(PNCP_BUDGET_S)
     seen = set()
-    for uf in UFS:
+    for uf in _ufs_rotacionadas():
         if not ok_tempo(): print("  PNCP: orcamento de tempo esgotado"); break
         uf_falhou = False
         n_uf = n
+        pag_max_vista = 0   # maior 'totalPaginas' visto -> detecta truncamento estrutural (nao so falha de rede)
+        pag_ok = 0          # ate onde realmente lemos
         for (d_ini, d_fim) in _janelas_pncp(PNCP_JANELA_DIAS):
             if not ok_tempo(): break
             pag, tot = 1, 1
-            while pag <= tot and pag <= 40:
+            while pag <= tot and pag <= PNCP_MAX_PAGINAS:
                 if not ok_tempo(): break
                 url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
                        '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
@@ -325,6 +355,7 @@ def coleta_pncp():
                 j = pncp_get(url)
                 if j is None: uf_falhou = True; break     # janela quebrou de vez
                 tot = j.get('totalPaginas') or tot
+                pag_max_vista = max(pag_max_vista, tot)
                 data = j.get('data') or []
                 for d in data:
                     nc = str(d.get('numeroControlePNCP') or '')
@@ -341,11 +372,16 @@ def coleta_pncp():
                                       'modalidade': d.get('modalidadeNome') or 'Pregao Eletronico',
                                       'uid': 'PNCP:' + nc}); n += 1
                 if not data: break
+                pag_ok = max(pag_ok, pag)
                 pag += 1; time.sleep(0.3)
             time.sleep(0.2)
-        # so alerta TRUNCOU se a UF falhou de vez E nao trouxe NADA (senao e falso alarme:
-        # uma janela antiga pode falhar mas a recente ja pegou os editais que importam).
-        if uf_falhou and n == n_uf: PNCP_TRUNC.append(uf)
+        # TRUNCOU: (a) falhou de vez sem trazer nada (rede), OU (b) truncamento SEVERO -- lemos
+        # menos de 80% das paginas disponiveis (teto/tempo). O limiar de 80% evita falso alarme
+        # em UF grande onde as ultimas paginas quase nunca tem concreto; so avisa quando o buraco
+        # e grande de verdade, pra diretoria nao ler 'cobertura parcial' todo dia (fadiga de alerta).
+        severo = pag_max_vista > 0 and pag_ok > 0 and pag_ok < 0.8 * pag_max_vista
+        if (uf_falhou and n == n_uf) or severo:
+            PNCP_TRUNC.append('%s(%d/%d pag)' % (uf, pag_ok, pag_max_vista) if severo else uf)
         time.sleep(0.3)
     return n
 
