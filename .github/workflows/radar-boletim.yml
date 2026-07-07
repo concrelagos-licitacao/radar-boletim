@@ -61,7 +61,10 @@ jobs:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_CC: ${{ secrets.EMAIL_CC }}
-        run: python boletim_email.py
+          SITE_URL: https://concrelagos-licitacao.github.io/radar-boletim
+        # `|| echo` (como o sync_filiais): uma falha no envio NUNCA derruba o job -> o site
+        # ainda e gerado/commitado. E-mail e so aviso; o site e a fonte de verdade.
+        run: python boletim_email.py || echo "e-mail falhou (segue o site)"
 
       - name: Gerar site (GitHub Pages)
         env:
