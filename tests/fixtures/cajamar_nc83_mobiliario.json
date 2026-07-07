@@ -1,0 +1,104 @@
+[
+ {
+  "descricao": "BANCO EUROPEU CONFECCIONADO EM CONCRETO ",
+  "quantidade": 300.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANCO EM CONCRETO REVESTIDO DE GRANILITE",
+  "quantidade": 300.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANCO FERRO CHATO E MADEIRA",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANCO AÇO E MADEIRA PLASTICA",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANCO ONDA EM CONCRETO VIBRADO",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANQUETA MÓDULO RETO 1,75",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BANQUETA ONDULADA CONFECCIONADA EM CONCRETO VIBRADO ",
+  "quantidade": 200.0,
+  "unidadeMedida": "UN",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BICICLETÁRIO EM CONCRETO E AÇO CARBONO",
+  "quantidade": 20.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "LIXEIRA TUBULAR CESTO TELA MODELO UBERABA MOEDA C/SUPORTE",
+  "quantidade": 600.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "CONJUNTO DE 04 (QUATRO) LIXEIRAS ",
+  "quantidade": 100.0,
+  "unidadeMedida": "CJT",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "LIXEIRA TUBULAR DUPLA TUBOS EM AÇO",
+  "quantidade": 200.0,
+  "unidadeMedida": "CJT",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "MESA QUADRADA 4 BANQUETAS",
+  "quantidade": 200.0,
+  "unidadeMedida": "CJT",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "LIXEIRA 150 L CONCRETO VIBRADO EM ALTO RELEVO",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "LIXEIRA 74 L CONCRETO VIBRADO EM ALTO RELEVO",
+  "quantidade": 100.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "PARACICLO “U” INOX 304",
+  "quantidade": 200.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "FLOREIRA COM BANCO 360º EM FULGET",
+  "quantidade": 30.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ },
+ {
+  "descricao": "BEBEDOURO DE CONCRETO TRIPLO",
+  "quantidade": 30.0,
+  "unidadeMedida": "UNI",
+  "materialOuServico": "M"
+ }
+]
