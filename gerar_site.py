@@ -324,6 +324,9 @@ def recalcular_distancias(todos):
 
         nova_dist = str(round(dist_decisao, 1))
         r['DISTANCIA_ROTA_REAL'] = e_real
+        # Passou de 70/400km POR ROTA REAL? Fica no dados.json (historia NUNCA some) mas o site esconde
+        # do boletim (o dono pediu "nada > 70km real p/ concreto"). Honra os DOIS pedidos: nao apaga E nao mostra.
+        r['FORA_RAIO_REAL'] = bool(dist_decisao > limite)
         nova_filial = '%s (%s/%s)' % (filial_escolhida[2], filial_escolhida[3], filial_escolhida[4])
         if str(r.get('DISTANCIA KM', '')) != nova_dist or r.get('FILIAL PROXIMA') != nova_filial:
             n_corrigidos += 1
@@ -1011,6 +1014,7 @@ function aplicar(){
   $('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
   var hoje=new Date();hoje.setHours(0,0,0,0);
   VIS=DADOS.filter(function(r){
+    if(r['FORA_RAIO_REAL']===true||g(r,'FORA_RAIO_REAL')==='True')return false;   // > 70/400km REAL: fica na historia (dados.json), fora do boletim
     if(isDesc(r)&&!verDesc)return false;          // descartado some (toggle 've descartados')
     if(verDesc&&!isDesc(r))return false;          // modo 've descartados' mostra so os descartados
     if(ocultarLidos&&isLido(r))return false;
@@ -1031,7 +1035,7 @@ function aplicar(){
 // ---- CALENDARIO por dia (igual ConLic): cada dia = o boletim capturado nele. Agrupa por
 // capturado_em (nao DATA SESSAO), entao o QD sem data entra certo. Clicar num dia filtra a lista. ----
 function capDia(r){return (g(r,'capturado_em')||'').slice(0,10);}
-function diasComEditais(){var m={};DADOS.forEach(function(r){var d=capDia(r);if(d)m[d]=(m[d]||0)+1;});return m;}
+function diasComEditais(){var m={};DADOS.forEach(function(r){if(r['FORA_RAIO_REAL']===true||g(r,'FORA_RAIO_REAL')==='True')return;var d=capDia(r);if(d)m[d]=(m[d]||0)+1;});return m;}
 function pad2(n){return (n<10?'0':'')+n;}
 function initCalMes(){var ds=Object.keys(diasComEditais()).sort();var last=ds[ds.length-1]||HOJE||'2026-01-01';var p=last.split('-');CAL_MES={y:+p[0],m:(+p[1])-1};}
 function renderCal(){
