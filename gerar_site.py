@@ -54,6 +54,24 @@ def _lixo(obj):
         return True
     return False
 
+# BRITA so serve RJ (pedreiras). Um edital de brita/agregados FORA do RJ deve sair -- mesmo que o
+# classificador tenha marcado TIPO=usina (objeto generico "materiais de construcao" ou agregados
+# puros como "areia, pedra britada, po de pedra"). Regra de CONTEUDO (nao confia so no TIPO).
+_BRITA_SIG = ('brita', 'pedra britada', 'pedras britadas', 'pedrisco', 'po de pedra', 'bica corrida',
+              'rachao', 'racho', 'bgs', 'brita graduada', 'pedra bruta', 'rejeito de pedra',
+              'materiais petreos', 'material petreo', 'seixo', 'cascalho', 'agregado graudo', 'agregados graudos')
+_CONC_SIG = ('concreto usinado', 'concreto pre-misturado', 'concreto pre misturado', 'concreto dosado',
+             'concreto bombeavel', 'concreto bombeado', 'concreto fck', 'concreto estrutural',
+             'concreto convencional', 'usinado', 'fck', 'bombeavel', 'central dosadora', 'concretagem',
+             'concreto usinado bombeavel')
+
+def _e_brita_pura(obj):
+    """True se o objeto e de BRITA/agregados e NAO tem sinal de concreto usinado -> so pode aparecer no RJ."""
+    o = _n(obj)
+    if not any(s in o for s in _BRITA_SIG):
+        return False
+    return not any(s in o for s in _CONC_SIG)
+
 
 def _pncp_link(numero):
     """numeroControlePNCP 'CNPJ-1-SEQ/ANO' -> URL real do edital (testado: abre o edital)."""
@@ -1867,9 +1885,11 @@ def main():
     if len(todos) < antes:
         print('  Limpeza: %d falsos positivos removidos do historico' % (antes - len(todos)))
 
-    # brita SO no RJ (regra do usuario 2026-07-04): limpa o acumulado do que ja entrou fora
+    # brita SO no RJ (regra do usuario 2026-07-04): limpa o acumulado do que ja entrou fora.
+    # Por CONTEUDO (nao so TIPO): pega tambem os de brita/agregados que o classificador marcou usina.
     antes = len(todos)
-    todos = [r for r in todos if not (r.get('TIPO') == 'pedreira' and str(r.get('UF', '')).upper() != 'RJ')]
+    todos = [r for r in todos if str(r.get('UF', '')).upper() == 'RJ'
+             or not (r.get('TIPO') == 'pedreira' or _e_brita_pura(r.get('OBJETO', '')))]
     if len(todos) < antes:
         print('  Brita fora do RJ removida do historico: %d' % (antes - len(todos)))
 
