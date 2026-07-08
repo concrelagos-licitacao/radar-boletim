@@ -69,13 +69,21 @@ _ITEM_EXCL_CTX = EXCL + (
     "reaterro", "regularizacao do fundo", "envelopamento", "guia", "bloco", "banco", "banqueta",
     "lixeira", "floreira", "bebedouro", "mesa", "paraciclo", "bicicletario", "mobiliario")
 
+# Sinal READY-MIX inequivoco (so concreto usinado, nunca brita-de-berco): vence o contexto acessorio.
+# O _ITEM_EXCL_CTX (berco/lastro/bloco) foi criado p/ 'brita de assentamento de tubo', mas rodando ANTES
+# do KW3 tambem matava usinado REAL de grande volume ('concreto usinado FCK 25 p/ lastro/bloco de fundacao').
+USINADO_FORTE = ("concreto usinado", "concreto bombeavel", "concreto bombeado", "concreto dosado",
+                 "concreto pre-misturado", "concreto pre misturado", "central dosadora", "concreto fck")
+
 
 def classificar_item(descricao):
     """Score de UM item isolado. Exige-se >=3 (produto explicito) p/ admitir o edital.
-    Ordem: HARD_EXCL -> contexto acessorio/pre-moldado -> KW3 (concreto usinado/brita produto)."""
+    Ordem: HARD_EXCL -> usinado-forte -> contexto acessorio/pre-moldado -> KW3 (concreto usinado/brita produto)."""
     t = _n(descricao)
     if any(e in t for e in HARD_EXCL):
         return 0
+    if any(k in t for k in USINADO_FORTE):
+        return 3                       # ready-mix explicito -> vence o contexto de berco (que so vale p/ brita acessoria)
     if any(e in t for e in _ITEM_EXCL_CTX):
         return 0                       # pre-moldado/drenagem/berco/mobiliario -> nunca via brita acessoria
     if any(k in t for k in KW3):

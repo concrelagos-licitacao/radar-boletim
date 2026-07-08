@@ -28,9 +28,10 @@ def _cor(uf):
     return CORES_UF.get(str(uf).upper(), '#455A64')
 
 
-def gerar_aviso(rows, hoje, truncou=''):
+def gerar_aviso(rows, hoje, truncou='', leitura_ok=True):
     """Monta o e-mail de AVISO (nao a tabela). `rows` = editais do boletim do dia (so pra contar
-    e resumir por UF). Blindado: qualquer campo estranho nao lanca excecao."""
+    e resumir por UF). `leitura_ok`=False quando NAO deu p/ ler a planilha (nao afirmar 'zero').
+    Blindado: qualquer campo estranho nao lanca excecao."""
     total = len(rows or [])
     por_uf = {}
     for r in (rows or []):
@@ -57,6 +58,8 @@ def gerar_aviso(rows, hoje, truncou=''):
              else '%d editais de concreto/brita no raio de atendimento hoje.' % total)
     if total == 0:
         frase = 'Nenhum edital novo de concreto/brita no raio hoje. O historico segue no site.'
+    if not leitura_ok:                       # leitura falhou -> nao mentir 'zero'; distinguir de zero-real
+        frase = 'Boletim do dia pronto — nao consegui contar os editais agora. Confira direto no site.'
 
     return '''<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -87,7 +90,7 @@ def main():
     creds_path = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json')
     # Blindagem: montar a mensagem NUNCA pode quebrar o envio. Se algo falhar ao ler o Sheet,
     # manda o aviso minimo (o site continua sendo a fonte).
-    rows, truncou = [], ''
+    rows, truncou, leitura_ok = [], '', True
     try:
         gc = gspread.service_account(filename=creds_path)
         sh = gc.open_by_key(SHEET_ID)
@@ -101,17 +104,19 @@ def main():
         except Exception as e:
             print('  (aviso de truncamento indisponivel: %s)' % repr(e)[:50])
     except Exception as e:
+        leitura_ok = False   # leitura falhou: NAO afirmar 'zero editais' (mentira num dia que tinha)
         print('  (nao consegui ler o boletim p/ contar: %s) — enviando aviso minimo' % repr(e)[:60])
 
     hoje = date.today()
     try:
-        html = gerar_aviso(rows, hoje, truncou)
+        html = gerar_aviso(rows, hoje, truncou, leitura_ok)
     except Exception as e:
         print('  (gerar_aviso falhou: %s) — aviso texto-puro' % repr(e)[:60])
         html = ('<p>Boletim de licitacoes de %s pronto. Veja em %s</p>'
                 % (hoje.strftime('%d/%m/%Y'), SITE_URL))
 
-    assunto = 'Radar Licitacoes %s — %d edital(is) no raio' % (hoje.strftime('%d/%m'), len(rows))
+    assunto = ('Radar Licitacoes %s — boletim pronto (ver no site)' % hoje.strftime('%d/%m') if not leitura_ok
+               else 'Radar Licitacoes %s — %d edital(is) no raio' % (hoje.strftime('%d/%m'), len(rows)))
 
     if not EMAIL_PASS:
         print('GMAIL_APP_PASSWORD nao configurado. Assunto:', assunto, '| Destinatario:', EMAIL_TO)

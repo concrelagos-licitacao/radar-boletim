@@ -14,6 +14,12 @@ on:
     - cron: '0 23 * * *'   # 20:00 BRT
   workflow_dispatch:         # botao "Run workflow" manual no GitHub
 
+# Serializa os runs deste workflow (crons + dispatch): sem isto, dois runs empurram docs/ ao mesmo
+# tempo e um leva 'failed to push some refs' (causa do run 28941360480 falhar e o boletim nao publicar).
+concurrency:
+  group: boletim-site
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -93,6 +99,15 @@ jobs:
       - name: Smoke-test do site (bloqueia commit se quebrou)
         if: success()
         run: python smoke_test.py
+
+      # Anti-corrida no push (causa do run 28941360480 falhar): se o remoto avancou desde o checkout
+      # (push manual de codigo), rebaseia por baixo das mudancas de docs/ antes do commit final.
+      - name: Sincronizar com o remoto antes do commit
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash origin ${{ github.ref_name }} || echo "sem rebase necessario"
 
       - name: Commit do site
         if: success()

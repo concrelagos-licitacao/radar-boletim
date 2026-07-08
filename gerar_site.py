@@ -291,6 +291,8 @@ def recalcular_distancias(todos):
             mantidos.append(r)
             continue
         tipo = (r.get('TIPO') or '').strip().lower()
+        if not tipo:                                     # TIPO vazio: inferir pelo objeto. Sem isto vira 'usina'
+            tipo = 'pedreira' if _e_brita_pura(r.get('OBJETO', '')) else 'usina'   # -> brita-RJ medida a 70km e podada (caberia em 400km)
         lista = pedreiras if tipo == 'pedreira' else usinas
         if not lista:
             mantidos.append(r)
@@ -312,9 +314,13 @@ def recalcular_distancias(todos):
             d0, f0 = candidatas[0]
             dist_decisao, filial_escolhida, e_real = d0, f0, False
 
-        if dist_decisao > limite:
+        # COBERTURA decide em LINHA RETA (menor haversine), NUNCA em rota real: a rota (ORS) e >= reta e
+        # varia com a disponibilidade da API -> decidir por ela APAGA de dados.json (historia!) editais que
+        # o radar coletou dentro do raio, e como a janela do PNCP ja passou eles nunca voltam. Regra #3
+        # (historia nunca some) manda. A rota real segue no NUMERO EXIBIDO (honesto), so nao decide a remocao.
+        if candidatas[0][0] > limite:
             n_removidos += 1
-            continue   # fora do raio real de atendimento -> nunca deveria aparecer
+            continue   # fora do raio EM LINHA RETA -> nem o radar teria coletado; seguranca, nao apaga historia
 
         nova_dist = str(round(dist_decisao, 1))
         r['DISTANCIA_ROTA_REAL'] = e_real

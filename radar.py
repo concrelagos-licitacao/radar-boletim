@@ -233,6 +233,12 @@ def _min_dist(coord, filiais, tipo):
 
 def _enriquecer(r, filiais):
     mun, uf = r.get('municipio', ''), r.get('uf', '')
+    conc0, brita0 = _material(r.get('objeto', ''))
+    # BRITA SO NO RJ (regra inviolavel): a checagem so depende da UF (sempre existe), vale mesmo sem
+    # geocodificar o municipio. Sem isto, orgao estadual/federal c/ municipio nao-parseavel ('') furava
+    # o gate mais abaixo e brita fora-RJ vazava pro boletim (via Licitar/PNCP-search).
+    if brita0 and not conc0 and uf and uf.upper() != 'RJ':
+        return None
     if not mun or not uf or not filiais:
         return r                                  # sem municipio/filiais -> nao da p/ validar raio, mantem
     coord = _geocode(mun, uf)
@@ -270,9 +276,12 @@ HOJE_ISO = hoje.isoformat()
 ini = hoje - datetime.timedelta(days=int(os.environ.get('PNCP_JANELA_TOTAL_DIAS', '10')))
 registros = []      # cada um: dict fonte/uf/municipio/orgao/objeto/data_sessao/data_pub/numero/link/uid
 PNCP_TRUNC = []     # UFs em que o PNCP truncou (integra=False) -> vira ALERTA
+QD_TRUNC   = []     # lotes/cidades do QD nao varridos (budget/falha) -> vira ALERTA (espelha PNCP_TRUNC)
 
-# orcamento de tempo POR FONTE: nenhuma fonte (ex: PNCP fora do ar) monopoliza o tempo das outras
-PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '900'))     # 15 min: SP tem ~46 pag em 10d e o PNCP e lento -> mais folga p/ COMPLETAR (nao truncar = nao perder Cajamar)
+# orcamento de tempo POR FONTE: nenhuma fonte (ex: PNCP fora do ar) monopoliza o tempo das outras.
+# 600s (era 900): o deadline-guard do pncp_get ja impede o desperdicio numa consulta caida, e sobra
+# tempo p/ o fallback coleta_pncp_search() (porta de busca) rodar quando o /api/consulta v1 trava.
+PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '600'))
 LICITAR_BUDGET_S = float(os.environ.get('LICITAR_BUDGET_S', '300'))  # 5 min
 def _prazo(segundos):
     fim = time.monotonic() + segundos
@@ -285,10 +294,13 @@ def _prazo(segundos):
 PNCP_TIMEOUT_S = float(os.environ.get('PNCP_TIMEOUT_S', '40'))
 PNCP_JANELA_DIAS = int(os.environ.get('PNCP_JANELA_DIAS', '5'))   # chunks menores (5d) = menos paginas/query = completa sob instabilidade
 
-def pncp_get(url):
-    """1 pagina com retry. Trata timeout/pagina-de-erro e throttle (vazio c/ totalRegistros>0)."""
+def pncp_get(url, ok_tempo=None):
+    """1 pagina com retry. Trata timeout/pagina-de-erro e throttle (vazio c/ totalRegistros>0).
+    ok_tempo: se dado, corta os retries quando o budget de tempo acabou -> uma pagina morta nao queima
+    ~40s x5 e nao mata de fome as UFs seguintes (bug do backbone zerando: 'COLETOU 0 + TRUNCOU SP')."""
     last = None
     for att in range(5):
+        if ok_tempo is not None and not ok_tempo(): return last   # budget acabou: cede tempo p/ as outras UFs
         try:
             r = requests.get(url, timeout=PNCP_TIMEOUT_S, headers=UA)
         except Exception:
@@ -382,8 +394,11 @@ def resolver_pendentes(final):
             descartados += 1; continue                      # PNCP falhou -> fallback = fora
         entra, item = edital_entra_por_itens(itens)
         if entra:
-            desc = (item.get('descricao') if isinstance(item, dict) else str(item)) or ''
-            desc = re.sub(r'\s+', ' ', desc).strip()[:90]      # descricoes do PNCP sao longas/repetidas
+            desc0 = (item.get('descricao') if isinstance(item, dict) else str(item)) or ''
+            ci, bi = _material(desc0)
+            if bi and not ci and (r.get('uf') or '').upper() != 'RJ':
+                descartados += 1; continue         # brita fora do RJ (regra inviolavel) -> nao entra pelo item
+            desc = re.sub(r'\s+', ' ', desc0).strip()[:90]     # descricoes do PNCP sao longas/repetidas
             porte = porte_m3(item)      # '~300 m3' se for m3; '' senao. NUNCA vira R$ (teto, nao compra)
             # porte PRIMEIRO (sinal que importa), depois a descricao curta -- cabe nos 300 chars
             selo = (' | achado no item: %s (teto) — %s' % (porte, desc)) if porte else (' | achado no item: %s' % desc)
@@ -420,8 +435,12 @@ def coleta_pncp():
     n = 0
     ok_tempo = _prazo(PNCP_BUDGET_S)
     seen = set()
-    for uf in _ufs_rotacionadas():
-        if not ok_tempo(): print("  PNCP: orcamento de tempo esgotado"); break
+    ufs = _ufs_rotacionadas()
+    for i, uf in enumerate(ufs):
+        if not ok_tempo():
+            print("  PNCP: orcamento de tempo esgotado")
+            for u in ufs[i:]: PNCP_TRUNC.append(u + '(pulada-budget)')   # UF nao varrida -> GRITA no alerta (nao some em silencio)
+            break
         uf_falhou = False
         n_uf = n
         pag_max_vista = 0   # maior 'totalPaginas' visto -> detecta truncamento estrutural (nao so falha de rede)
@@ -434,7 +453,7 @@ def coleta_pncp():
                 url = ('https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao'
                        '?dataInicial=%s&dataFinal=%s&codigoModalidadeContratacao=6&uf=%s&pagina=%d&tamanhoPagina=50'
                        % (d_ini.strftime('%Y%m%d'), d_fim.strftime('%Y%m%d'), uf, pag))
-                j = pncp_get(url)
+                j = pncp_get(url, ok_tempo)
                 if j is None: uf_falhou = True; break     # janela quebrou de vez
                 tot = j.get('totalPaginas') or tot
                 pag_max_vista = max(pag_max_vista, tot)
@@ -471,6 +490,70 @@ def coleta_pncp():
         if (uf_falhou and n == n_uf) or severo:
             PNCP_TRUNC.append('%s(%d/%d pag)' % (uf, pag_ok, pag_max_vista) if severo else uf)
         time.sleep(0.3)
+    return n
+
+# ---------- 1b) PNCP porta alternativa: /api/search (index ElasticSearch do frontend pncp.gov.br) ----------
+# Fallback AUTOMATICO quando o /api/consulta v1 cai/trunca. Verificado ao vivo 2026-07-08: no MESMO
+# minuto em que o consulta deu ReadTimeout, a search respondeu 200 (SP concreto PE = 99 resultados).
+# MESMA base, MESMO numero_controle_pncp -> o dedup por uid 'PNCP:'+nc casa direto e pncp_itens_lista()
+# (m3) aponta pro mesmo backend UP. Regras: status=recebendo_proposta e OBRIGATORIO (sem ele -> HTTP 400);
+# modalidades=6 = PE (mesmo codigo do consulta); UMA UF por request (multi-UF retorna 0); q= busca
+# textual server-side que inclui os ITENS -> pega concreto escondido em objeto vago (classe Cajamar).
+UA_SEARCH = dict(UA, **{'Accept': 'application/json, text/plain, */*', 'Referer': 'https://pncp.gov.br/app/editais'})
+PNCP_SEARCH_Q = ('concreto', 'brita')
+PNCP_SEARCH_TAMPAG = 50
+
+def _pncp_search_get(uf, q, pagina, ok_tempo=None):
+    url = ('https://pncp.gov.br/api/search/?tipos_documento=edital&ordenacao=-data'
+           '&pagina=%d&tam_pagina=%d&status=recebendo_proposta&ufs=%s&modalidades=6&q=%s'
+           % (pagina, PNCP_SEARCH_TAMPAG, uf, requests.utils.quote(q)))
+    for att in range(3):
+        if ok_tempo is not None and not ok_tempo(): return None
+        try:
+            r = requests.get(url, timeout=PNCP_TIMEOUT_S, headers=UA_SEARCH)
+            if r.status_code == 200: return r.json()
+            time.sleep(1.2 * (att + 1))
+        except Exception:
+            time.sleep(1.2 * (att + 1))
+    return None
+
+def coleta_pncp_search():
+    """Porta de busca do PNCP -- so como FALLBACK do coleta_pncp (consulta v1). Espelha o shape do
+    registro do coleta_pncp; a classificacao reusa rel()/_familia_construcao (o MESMO gate) e o
+    item-check confirma os pendentes in-raio depois. Dedup final por uid 'PNCP:'+nc."""
+    n = 0
+    ok_tempo = _prazo(PNCP_BUDGET_S)
+    seen = set(r.get('numero') for r in registros if r.get('fonte') == 'PNCP' and r.get('numero'))
+    for uf in _ufs_rotacionadas():
+        if not ok_tempo(): print("  PNCP-search: orcamento de tempo esgotado"); break
+        for q in PNCP_SEARCH_Q:
+            if not ok_tempo(): break
+            pag, tot = 1, 1
+            while pag <= tot and pag <= PNCP_MAX_PAGINAS:
+                if not ok_tempo(): break
+                j = _pncp_search_get(uf, q, pag, ok_tempo)
+                if j is None: break
+                total = j.get('total') or 0
+                tot = (total + PNCP_SEARCH_TAMPAG - 1) // PNCP_SEARCH_TAMPAG if total else 1
+                items = j.get('items') or []
+                if not items: break
+                for it in items:
+                    nc = str(it.get('numero_controle_pncp') or '')
+                    if not nc or nc in seen: continue
+                    seen.add(nc)
+                    objeto = it.get('description') or it.get('title') or ''
+                    aceito = rel(objeto)
+                    pendente = (not aceito) and PNCP_ITENS and _familia_construcao(objeto)
+                    if not aceito and not pendente: continue
+                    registros.append({'fonte': 'PNCP', 'uf': it.get('uf', uf),
+                                      'municipio': it.get('municipio_nome', ''),
+                                      'orgao': it.get('orgao_nome', ''), 'objeto': objeto[:300],
+                                      'data_sessao': iso(it.get('data_fim_vigencia')),
+                                      'data_pub': iso(it.get('data_publicacao_pncp')), 'numero': nc,
+                                      'link': _pncp_link(nc), 'valor': it.get('valor_global') or '',
+                                      'modalidade': it.get('modalidade_licitacao_nome') or 'Pregao Eletronico',
+                                      'pendente_item': pendente, 'uid': 'PNCP:' + nc}); n += 1
+                pag += 1; time.sleep(0.3)
     return n
 
 # ---------- 2) Querido Diario ----------
@@ -551,25 +634,31 @@ def coleta_qd():
         return n
     ok_tempo = _prazo(float(os.environ.get('QD_BUDGET_S', '180')))
     lotes = 0
+    total = (len(cods) + QD_BATCH - 1) // QD_BATCH       # lotes planejados -> mede a cobertura
+    falhos = 0
     for i in range(0, len(cods), QD_BATCH):
         if not ok_tempo():
-            print("  QD-IBGE: orcamento de tempo esgotado no lote %d" % lotes); break
+            print("  QD-IBGE: orcamento de tempo esgotado no lote %d" % lotes)
+            QD_TRUNC.append('budget: %d/%d lotes varridos' % (lotes, total)); break   # GRITA: varredura parcial
         lote = cods[i:i + QD_BATCH]
         params = [('querystring', QD_QUERY), ('published_since', ini.isoformat()),
                   ('published_until', hoje.isoformat()), ('size', 200), ('sort_by', 'descending_date')]
         params += [('territory_ids', c) for c in lote]
+        lote_ok = False
         for att in range(3):
             try:
-                r = requests.get(QD_URL, params=params, timeout=50, headers=UA)
+                r = requests.get(QD_URL, params=params, timeout=25, headers=UA)   # 25s (era 50): lote travado nao come o budget
                 if r.status_code == 200:
                     n += _qd_ingest((r.json() or {}).get('gazettes', []))
-                    break
+                    lote_ok = True; break
                 time.sleep(1.2 * (att + 1))
             except Exception:
                 time.sleep(1.2 * (att + 1))
+        if not lote_ok: falhos += 1                       # lote que falhou 3x -> cidades daquele lote ficaram cegas
         lotes += 1
         time.sleep(0.3)
-    print("  QD-IBGE: %d lotes varridos -> %d editais no raio" % (lotes, n))
+    if falhos: QD_TRUNC.append('%d lote(s) sem resposta' % falhos)
+    print("  QD-IBGE: %d lotes varridos -> %d editais no raio%s" % (lotes, n, (' [TRUNCOU: %s]' % '; '.join(QD_TRUNC)) if QD_TRUNC else ''))
     return n
 
 # ---------- 3) Licitar Digital ----------
@@ -616,7 +705,12 @@ def coleta_licitar():
     return n
 
 print("== BOLETIM GRATIS concreto/brita | janela %s a %s | UFs %s ==" % (ini, hoje, UFS))
-c_pncp, c_qd, c_lic = coleta_pncp(), coleta_qd(), coleta_licitar()
+c_pncp = coleta_pncp()
+if c_pncp == 0 or PNCP_TRUNC:      # consulta v1 caiu/truncou -> abre a porta alternativa (mesma base, backend de busca)
+    c_sea = coleta_pncp_search()
+    print("  PNCP-search (fallback consulta v1): +%d editais pela porta de busca" % c_sea)
+    c_pncp += c_sea
+c_qd, c_lic = coleta_qd(), coleta_licitar()
 print("PNCP:", c_pncp, "| Querido Diario:", c_qd, "| Licitar Digital:", c_lic)
 
 # ---------- dedup POR IDENTIDADE (uid + texto COMPLETO; NUNCA por prefixo truncado) ----------
@@ -629,13 +723,17 @@ registros.sort(key=lambda x: ordem.get(x['fonte'], 9))
 # credibilidade do veredito. Regra: o QD so vale onde o PNCP NAO viu (municipio sem edital PNCP) --
 # que e justamente o valor do QD (interior <20k que o PNCP nao cobre ate 2027). Onde ha PNCP, ele
 # e a fonte autoritativa; o QD daquele municipio e descartado.
-mun_pncp = set(_n(r.get('municipio', '')) for r in registros
-               if r.get('fonte') == 'PNCP' and r.get('municipio'))
+# chave (municipio, UF): nome de cidade NAO e unico (Rio Claro SP/RJ, Mesquita MG/RJ, Valenca BA/RJ,
+# Cantagalo MG-PR-RJ) -> a chave so-nome apagava o QD do homonimo do RJ-core. E ignora o PNCP
+# 'pendente_item' (ainda nao confirmado): senao um objeto vago do PNCP pre-suprime o QD e, se o
+# item-check depois descartar, a cidade fica CEGA (sem nenhuma fonte).
+mun_pncp = set((_n(r.get('municipio', '')), (r.get('uf') or '').upper()) for r in registros
+               if r.get('fonte') == 'PNCP' and r.get('municipio') and not r.get('pendente_item'))
 vistos_uid, vistos_txt, mirror, final = set(), set(), {}, []
 n_qd_sup = 0
 for r in registros:
-    if r.get('fonte') == 'QUERIDO_DIARIO' and _n(r.get('municipio', '')) in mun_pncp:
-        n_qd_sup += 1; continue                            # PNCP ja cobre esse municipio -> nao duplica
+    if r.get('fonte') == 'QUERIDO_DIARIO' and (_n(r.get('municipio', '')), (r.get('uf') or '').upper()) in mun_pncp:
+        n_qd_sup += 1; continue                            # PNCP ja cobre esse municipio+UF -> nao duplica
     uid = r.get('uid') or ''
     if uid and uid in vistos_uid: continue                 # mesma fonte relistando o mesmo edital
     ob = norm(r['objeto'])
@@ -681,6 +779,7 @@ for f in ('PNCP', 'LICITAR_DIGITAL', 'QUERIDO_DIARIO'):
     if atual == 0 and antes > 0: alertas.append("FONTE %s COLETOU 0 (antes %d)" % (f, antes))
     elif antes >= 10 and atual < antes * 0.5: alertas.append("FONTE %s DESPENCOU %d->%d" % (f, antes, atual))
 if PNCP_TRUNC: alertas.append("PNCP TRUNCOU (dados incompletos): " + ", ".join(PNCP_TRUNC))
+if QD_TRUNC: alertas.append("QD VARRIDO PARCIAL (cidade cega possivel): " + ", ".join(QD_TRUNC))
 alerta_txt = " | ".join(alertas) if alertas else "OK - todas as fontes saudaveis"
 
 # log de saude -> baseline pra proxima rodada (compara RAW = a fonte respondeu?).
@@ -692,7 +791,7 @@ if (not prev) or (not prev[0]) or (prev[0][0].strip().upper() != 'QUANDO'):
     ws_saude.clear()                                  # cabecalho ausente/corrompido -> reescreve limpo
     ws_saude.update(values=[HDR_SAUDE], range_name='A1')
 ws_saude.append_row([AGORA, len(final), json.dumps(raw), json.dumps(poruf),
-                     c_pncp, c_lic, c_qd, ", ".join(PNCP_TRUNC), alerta_txt],
+                     c_pncp, c_lic, c_qd, ", ".join(PNCP_TRUNC + QD_TRUNC), alerta_txt],
                     table_range='A1', value_input_option='USER_ENTERED')   # ancora em A1 -> nao desliza
 
 # ---------- enriquece com distancia geo + REGRA DE RAIO (concreto<=70km usina, brita<=300km pedreira) ----------
