@@ -745,6 +745,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="card"><div class="lbl">Alvos prioritarios</div><div class="val" id="kAlvo">-</div><div class="sub">orgaos que ja fornecemos</div></div>
           <div class="card"><div class="lbl">Cidades no raio</div><div class="val" id="kRaio">-</div><div class="sub">cobertura obrigatoria</div></div>
           <div class="card"><div class="lbl">Captura vs ConLic</div><div class="val" id="kCap">-</div><div class="sub" id="kCapL">medido no backtest</div></div>
+          <div class="card"><div class="lbl">Via Diario Oficial</div><div class="val" id="kDiario">-</div><div class="sub">interior que o PNCP nao ve ate 2027</div></div>
         </div>
       </div>
       <div class="graficos">
@@ -1388,7 +1389,12 @@ function carregaRadarNum(){
 }
 carregaRadarNum();
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
+  DADOS=d||[];$('load').style.display='none';$('app').style.display='block';
+  // PROVA de cobertura (conselho): editais que so o Diario Oficial trouxe = interior <20k que o
+  // PNCP nao ve ate 2027. E o que o QD exaustivo por IBGE captura e o PNCP nao.
+  var nDiario=DADOS.filter(function(x){return /diario/i.test(g(x,'FONTE'));}).length;
+  if($('kDiario')){$('kDiario').textContent=nDiario;if(nDiario&&$('radarnum'))$('radarnum').style.display='block';}
+  popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
   $('load').style.display='none';$('app').style.display='block';
   $('erro').innerHTML='<div style="background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:14px;border-radius:10px;margin:16px 0">Nao foi possivel carregar os dados. Recarregue a pagina.</div>';
