@@ -68,6 +68,7 @@ _geocoder_inst = [None]
 _GEO_OFF = [False]      # disjuntor: desliga geocoding se Nominatim cair
 _GEO_FALHAS = [0]       # falhas/timeouts consecutivos
 _BASE_MUN = {}          # base local IBGE: (nome_norm, UF) -> (lat, lon)
+_BASE_IBGE = {}         # (nome_norm, UF) -> codigo_ibge (territory_id do Querido Diario)
 
 def _carregar_base_mun():
     if _BASE_MUN:
@@ -76,8 +77,12 @@ def _carregar_base_mun():
         import csv
         with open('municipios_br.csv', encoding='utf-8') as f:
             for row in csv.DictReader(f):
-                _BASE_MUN[(row['nome_norm'], row['uf'].upper())] = (float(row['lat']), float(row['lon']))
-        print("  BASE MUNICIPIOS: %d carregados (geocoding local, sem rede)" % len(_BASE_MUN))
+                k = (row['nome_norm'], row['uf'].upper())
+                _BASE_MUN[k] = (float(row['lat']), float(row['lon']))
+                cib = (row.get('codigo_ibge') or '').strip()
+                if cib:
+                    _BASE_IBGE[k] = cib
+        print("  BASE MUNICIPIOS: %d carregados (geocoding local, sem rede) | %d com IBGE" % (len(_BASE_MUN), len(_BASE_IBGE)))
     except Exception as e:
         print("  BASE MUNICIPIOS indisponivel (%s) -- caira no Nominatim" % repr(e)[:50])
     return _BASE_MUN
@@ -465,30 +470,102 @@ def coleta_pncp():
     return n
 
 # ---------- 2) Querido Diario ----------
-def coleta_qd():
-    n = 0
+QD_URL = 'https://api.queridodiario.ok.org.br/gazettes'
+QD_QUERY = '"concreto usinado" OR brita OR "pedras britadas" OR "concreto bombeavel" OR "concreto dosado" OR "pedra britada"'
+QD_BATCH = int(os.environ.get('QD_BATCH', '40'))       # territory_ids por request (URL nao pode ser gigante)
+_RAIO_IBGE = [None]
+
+def _raio_ibge_codes():
+    """Codigos IBGE (territory_id do QD) das cidades no raio -> varredura EXAUSTIVA cidade-a-cidade.
+    haversine e um SUPERSET do raio de rota real (rota >= reta), entao cobre toda cidade que o filtro
+    final manteria -- zero cidade cega. Cacheado. Retorna [] se nao der (cai na busca global)."""
+    if _RAIO_IBGE[0] is not None:
+        return _RAIO_IBGE[0]
+    _carregar_base_mun()                                # popula _BASE_MUN e _BASE_IBGE
     try:
-        params = {'querystring': '"concreto usinado" OR brita OR "pedras britadas"',
-                  'published_since': ini.isoformat(), 'published_until': hoje.isoformat(),
-                  'size': 200, 'sort_by': 'descending_date'}
-        r = requests.get('https://api.queridodiario.ok.org.br/gazettes', params=params, timeout=50, headers=UA)
-        if r.status_code != 200: print("  QD HTTP", r.status_code); return 0
-        for g in (r.json() or {}).get('gazettes', []):
-            if (g.get('state_code') or '').upper() not in UFS: continue
-            exc = ' '.join(g.get('excerpts') or [])
-            # Querido Diario e RUIDOSO (texto integral do diario) -> exige SINAL FORTE (score 3:
-            # 'pedra britada'/'concreto usinado'...), nao so score 2, senao entra lixo administrativo.
-            if score(exc) < 3: continue
-            if not re.search(r'(pregao|preg[ao]o|licita|edital|tomada de pre|aviso)', exc, re.I): continue
-            obj = re.sub(r'\s+', ' ', exc)[:300]
-            registros.append({'fonte': 'QUERIDO_DIARIO', 'uf': (g.get('state_code') or '').upper(), 'municipio': g.get('territory_name', ''),
-                              'orgao': (g.get('territory_name', '') + ' (Diario Oficial)'), 'objeto': obj,
-                              'data_sessao': '', 'data_pub': iso(g.get('date')), 'numero': '',
-                              'link': g.get('txt_url') or g.get('url') or '',
-                              'uid': 'QD:' + hashlib.md5(norm(g.get('territory_name','') + obj).encode()).hexdigest()[:16]})
-            n += 1
+        gc = gspread.service_account(filename=os.environ.get('GOOGLE_SHEETS_CREDENTIALS_PATH', 'credenciais/service_account.json'))
+        filiais = _carregar_filiais(gc)
     except Exception as e:
-        print("  QD erro:", repr(e)[:100])
+        print("  QD-IBGE: sem filiais (%s) -> busca global" % repr(e)[:50])
+        _RAIO_IBGE[0] = []
+        return []
+    usinas = [(f['latitude'], f['longitude']) for f in filiais if 'pedreira' not in _n(f.get('tipo', ''))]
+    pedreiras = [(f['latitude'], f['longitude']) for f in filiais if 'pedreira' in _n(f.get('tipo', ''))]
+    cods = set()
+    for (nome, uf), (la, lo) in _BASE_MUN.items():
+        cib = _BASE_IBGE.get((nome, uf))
+        if not cib:
+            continue
+        c = (la, lo)
+        dentro = any(_haversine_km(c, u) <= RAIO_USINA_KM for u in usinas)
+        if not dentro and uf == 'RJ':                   # brita so RJ
+            dentro = any(_haversine_km(c, p) <= RAIO_PEDREIRA_KM for p in pedreiras)
+        if dentro:
+            cods.add(cib)
+    _RAIO_IBGE[0] = sorted(cods)
+    print("  QD-IBGE: %d cidades no raio p/ varrer (usinas %d, pedreiras %d)" % (len(cods), len(usinas), len(pedreiras)))
+    return _RAIO_IBGE[0]
+
+def _qd_ingest(gazettes):
+    """Filtra e adiciona as gazetas do QD (mesma logica de sempre: sinal forte + termo de licitacao)."""
+    n = 0
+    for g in gazettes or []:
+        exc = ' '.join(g.get('excerpts') or [])
+        # QD e RUIDOSO (texto integral) -> exige SINAL FORTE (score 3), senao entra lixo administrativo.
+        if score(exc) < 3:
+            continue
+        if not re.search(r'(pregao|preg[ao]o|licita|edital|tomada de pre|aviso)', exc, re.I):
+            continue
+        obj = re.sub(r'\s+', ' ', exc)[:300]
+        uid = 'QD:' + hashlib.md5(norm(g.get('territory_name', '') + obj).encode()).hexdigest()[:16]
+        if any(r.get('uid') == uid for r in registros):
+            continue
+        registros.append({'fonte': 'QUERIDO_DIARIO', 'uf': (g.get('state_code') or '').upper(),
+                          'municipio': g.get('territory_name', ''),
+                          'orgao': (g.get('territory_name', '') + ' (Diario Oficial)'), 'objeto': obj,
+                          'data_sessao': '', 'data_pub': iso(g.get('date')), 'numero': '',
+                          'link': g.get('txt_url') or g.get('url') or '', 'uid': uid})
+        n += 1
+    return n
+
+def coleta_qd():
+    """Querido Diario EXAUSTIVO por IBGE: varre CADA cidade do raio (territory_ids) em vez de uma
+    busca global de texto -- fecha o interior <20k que o PNCP nao ve ate 2027. Meta: zero cidade
+    cega. Fallback: se nao houver codigos de raio (sem filiais/IBGE), usa a busca global antiga."""
+    n = 0
+    cods = _raio_ibge_codes()
+    if not cods:
+        try:
+            r = requests.get(QD_URL, params={'querystring': QD_QUERY, 'published_since': ini.isoformat(),
+                             'published_until': hoje.isoformat(), 'size': 200, 'sort_by': 'descending_date'},
+                             timeout=50, headers=UA)
+            if r.status_code == 200:
+                gz = [g for g in (r.json() or {}).get('gazettes', []) if (g.get('state_code') or '').upper() in UFS]
+                n = _qd_ingest(gz)
+        except Exception as e:
+            print("  QD erro (global):", repr(e)[:80])
+        return n
+    ok_tempo = _prazo(float(os.environ.get('QD_BUDGET_S', '180')))
+    lotes = 0
+    for i in range(0, len(cods), QD_BATCH):
+        if not ok_tempo():
+            print("  QD-IBGE: orcamento de tempo esgotado no lote %d" % lotes); break
+        lote = cods[i:i + QD_BATCH]
+        params = [('querystring', QD_QUERY), ('published_since', ini.isoformat()),
+                  ('published_until', hoje.isoformat()), ('size', 200), ('sort_by', 'descending_date')]
+        params += [('territory_ids', c) for c in lote]
+        for att in range(3):
+            try:
+                r = requests.get(QD_URL, params=params, timeout=50, headers=UA)
+                if r.status_code == 200:
+                    n += _qd_ingest((r.json() or {}).get('gazettes', []))
+                    break
+                time.sleep(1.2 * (att + 1))
+            except Exception:
+                time.sleep(1.2 * (att + 1))
+        lotes += 1
+        time.sleep(0.3)
+    print("  QD-IBGE: %d lotes varridos -> %d editais no raio" % (lotes, n))
     return n
 
 # ---------- 3) Licitar Digital ----------
