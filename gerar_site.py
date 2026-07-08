@@ -1214,6 +1214,15 @@ function carregaHist(cb){                 // fetch unico do historico.json (BI +
   }).catch(function(){if(cb)cb();});
 }
 function mnorm(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();}
+// Trava de qualidade dos alertas de re-licitacao (conselho): 'situacao' vem vazia em quase todos
+// -> nao sabemos se o contrato ja foi renovado. NUNCA alertar "urgente" como certeza. Cruzamos
+// com o boletim de hoje: se o municipio do contrato ja tem edital novo no radar = "re-licitacao JA
+// no radar" (verde, acionavel); senao = "confirmar status" (e um lembrete p/ conferir, nao certeza).
+function relicMun(cliente){var m=String(cliente||'');var i=m.toLowerCase().lastIndexOf(' de ');if(i>=0)m=m.slice(i+4);return mnorm(m.replace(/\/[a-z]{2}\s*$/i,''));}
+function relicStatus(v){var mun=relicMun(v.cliente);
+  if(mun&&DADOS.some(function(r){return mnorm(g(r,'MUNICIPIO'))===mun;}))
+    return '<span style="color:#16A34A;font-weight:700" title="ja apareceu edital novo desse orgao no boletim de hoje">&#10003; re-licitacao ja no radar</span>';
+  return '<span style="color:#B45309" title="o contrato pode ja ter sido renovado -- confirme na fonte antes de agir">confirmar status</span>';}
 function precoOrgaoHTML(r){               // "ja negociamos com este orgao" (cruza MUNICIPIO do edital)
   var mun=mnorm(g(r,'MUNICIPIO')),e=PRECOS_ORGAO[mun];
   if(!e){var org=mnorm(g(r,'ORGAO'));for(var k in PRECOS_ORGAO){if(k.length>=4&&org.indexOf(k)>=0){e=PRECOS_ORGAO[k];break;}}}
@@ -1235,8 +1244,8 @@ function renderHistBI(){
     CHH.vol=new Chart($('cVol'),{type:'bar',data:{labels:labels,datasets:[{data:anos.map(function(a){return a.volume;}),backgroundColor:'#3A4149',borderRadius:4}]},options:opt(false)});
     var th='';(h.top_clientes||[]).slice(0,10).forEach(function(t){th+='<div class="hrow"><span class="nm" title="'+esc(t.cliente)+'">'+esc(t.cliente)+'</span><span class="mt"><b>'+fcomp(t.volume)+'</b> m3'+(t.valor?' · R$ '+fcomp(t.valor):'')+'</span></div>';});
     $('htop').innerHTML=th||'<div style="color:#9CA3AF;padding:10px">Sem dados de pregoes.</div>';
-    var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'</span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+'</span></div>';});
-    $('hvencer').innerHTML=vh||'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>';
+    var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'<br><small>'+relicStatus(v)+'</small></span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+(v.valor?'<br><small style="color:#6B7280">R$ '+fcomp(v.valor)+'</small>':'')+'</span></div>';});
+    $('hvencer').innerHTML=(vh?'<div style="color:#9CA3AF;font-size:.72rem;padding:2px 10px 8px">Contratos NOSSOS vencendo — provavel re-licitacao. Confirme se nao foi renovado antes de agir.</div>'+vh:'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>');
   });
 }
 function renderHist(){
