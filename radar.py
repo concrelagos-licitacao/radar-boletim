@@ -263,12 +263,16 @@ def _enriquecer(r, filiais):
 AGORA = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 hoje = datetime.date.today()
 HOJE_ISO = hoje.isoformat()
-ini = hoje - datetime.timedelta(days=14)
+# Janela 10 dias (era 14): SP tem ~65 paginas de 50 em 14 dias (PNCP trava tamanhoPagina em 50) e
+# trunca sob instabilidade -> perdia editais nas paginas altas (ex: Cajamar nc 38, concreto usinado
+# 562 m3 escondido em "obras de infraestrutura"). Menos dias = menos paginas = SP COMPLETA. Coletamos
+# 7x/dia, entao 10 dias e folga de sobra p/ pegar todo edital novo; a historia acumulada nunca some.
+ini = hoje - datetime.timedelta(days=int(os.environ.get('PNCP_JANELA_TOTAL_DIAS', '10')))
 registros = []      # cada um: dict fonte/uf/municipio/orgao/objeto/data_sessao/data_pub/numero/link/uid
 PNCP_TRUNC = []     # UFs em que o PNCP truncou (integra=False) -> vira ALERTA
 
 # orcamento de tempo POR FONTE: nenhuma fonte (ex: PNCP fora do ar) monopoliza o tempo das outras
-PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '600'))     # 10 min (evita truncar = nao perder)
+PNCP_BUDGET_S    = float(os.environ.get('PNCP_BUDGET_S', '900'))     # 15 min: SP tem ~46 pag em 10d e o PNCP e lento -> mais folga p/ COMPLETAR (nao truncar = nao perder Cajamar)
 LICITAR_BUDGET_S = float(os.environ.get('LICITAR_BUDGET_S', '300'))  # 5 min
 def _prazo(segundos):
     fim = time.monotonic() + segundos
@@ -279,7 +283,7 @@ def _prazo(segundos):
 # Solucao: quebrar em JANELAS de 7 dias (payload menor COMPLETA) + retry de throttle
 # ('pagina vazia com totalRegistros>0' = throttle, nao fim dos dados -- licao do comparativo.py).
 PNCP_TIMEOUT_S = float(os.environ.get('PNCP_TIMEOUT_S', '40'))
-PNCP_JANELA_DIAS = int(os.environ.get('PNCP_JANELA_DIAS', '7'))
+PNCP_JANELA_DIAS = int(os.environ.get('PNCP_JANELA_DIAS', '5'))   # chunks menores (5d) = menos paginas/query = completa sob instabilidade
 
 def pncp_get(url):
     """1 pagina com retry. Trata timeout/pagina-de-erro e throttle (vazio c/ totalRegistros>0)."""
