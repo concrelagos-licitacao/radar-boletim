@@ -143,6 +143,8 @@
   .resumoia b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#A9781F;margin-bottom:4px;font-family:var(--disp)}
   .resumoia .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .orgbox{background:#EAF5EC;border:1px solid #BFE3C6;border-left:4px solid var(--ok);border-radius:8px;padding:9px 12px;margin:8px 0}
+  .vgo{background:var(--ok);color:#fff;border-radius:8px;padding:9px 12px;margin:8px 0;font-size:.86rem;font-weight:700;line-height:1.45}
+  .vgo b{color:#FEF3C7}
   .orgbox b{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.03em;color:#15803D;margin-bottom:4px;font-family:var(--disp)}
   .orgbox .rtxt{font-size:.82rem;color:#374151;line-height:1.5}
   .frescor-warn{background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:10px 0;font-size:.85rem;font-weight:600}
@@ -192,11 +194,11 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
         <div class="s">Radar de licitacoes de concreto &amp; brita (Pregao Eletronico) + precificacao por orgao · fontes: PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>07/07/2026 21:58</b></div>
+      <div class="updated">Ultima varredura<br><b>07/07/2026 22:28</b></div>
     </div>
 
     <div id="erro"></div>
-    <div id="frescor" data-gerado="2026-07-07T21:58:40" style="display:none"></div>
+    <div id="frescor" data-gerado="2026-07-07T22:28:45" style="display:none"></div>
     <div id="saude" style="display:none"></div>
 
     <div class="tabbar">
@@ -707,12 +709,22 @@ function relicStatus(v){var mun=relicMun(v.cliente);
   if(mun&&DADOS.some(function(r){return mnorm(g(r,'MUNICIPIO'))===mun;}))
     return '<span style="color:#16A34A;font-weight:700" title="ja apareceu edital novo desse orgao no boletim de hoje">&#10003; re-licitacao ja no radar</span>';
   return '<span style="color:#B45309" title="o contrato pode ja ter sido renovado -- confirme na fonte antes de agir">confirmar status</span>';}
+// VEREDITO por edital (Gate DECIDIR): transforma "lista" em "acao". So aparece quando ja
+// vendemos ao orgao (incumbente = P1 = onde o PGL-r mora). GO + preco-alvo (nossa mediana
+// praticada) + distancia. Rotulado como referencia, nunca ordem cravada.
+function vereditoAlvo(r,e){
+  var km=kmNum(r), pm=e&&e.preco_med;
+  var dist=(km!=null)?(' a ~'+Math.round(km)+' km da unidade'):'';
+  var alvo=pm?(' Preco-alvo <b>R$ '+fnum(pm)+'/m³</b> (nossa mediana praticada aqui).'):'';
+  return '<div class="vgo">&#10003; VALE DISPUTAR — ja ganhamos neste orgao '+(e.n||0)+'x'+dist+'.'+alvo
+    +' <span style="font-weight:400">Confirme o edital e prepare a proposta.</span></div>';
+}
 function precoOrgaoHTML(r){               // "ja negociamos com este orgao" (cruza MUNICIPIO do edital)
   var mun=mnorm(g(r,'MUNICIPIO')),e=PRECOS_ORGAO[mun];
   if(!e){var org=mnorm(g(r,'ORGAO'));for(var k in PRECOS_ORGAO){if(k.length>=4&&org.indexOf(k)>=0){e=PRECOS_ORGAO[k];break;}}}
   if(!e)return '';
   var faixa=e.preco_med?('faixa usual R$ '+fnum(e.preco_p25)+'–'+fnum(e.preco_p75)+'/m³ · mediana <b>R$ '+fnum(e.preco_med)+'</b>'):'sem preço registrado';
-  return '<div class="orgbox"><b>Já negociamos com este órgão</b><div class="rtxt">'+e.n+' pregão(ões) no histórico'+(e.ultimo_ano?' (última em '+esc(e.ultimo_ano)+')':'')+' · '+faixa+(e.volume?' · '+fcomp(e.volume)+' m³ contratados':'')+'<br><span style="color:#9CA3AF;font-size:.72rem">referência do que já praticamos — confira o edital atual</span></div></div>';
+  return vereditoAlvo(r,e)+'<div class="orgbox"><b>Já negociamos com este órgão</b><div class="rtxt">'+e.n+' pregão(ões) no histórico'+(e.ultimo_ano?' (última em '+esc(e.ultimo_ano)+')':'')+' · '+faixa+(e.volume?' · '+fcomp(e.volume)+' m³ contratados':'')+'<br><span style="color:#9CA3AF;font-size:.72rem">referência do que já praticamos — confira o edital atual</span></div></div>';
 }
 function renderHistBI(){
   carregaHist(function(){
