@@ -888,6 +888,10 @@ function valNum(r){var v=g(r,'VALOR').trim();if(!v)return null;
   // senao ponto e decimal (float do PNCP: 555181.0) -> mantem
   var n=parseFloat(v);return isNaN(n)||n<=0?null:n;}
 function fmtBRL(n){if(n==null)return '-';if(n>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';return 'R$ '+n.toLocaleString('pt-BR',{maximumFractionDigits:0});}
+// valor sigiloso: PNCP manda 0/vazio quando o orgao esconde o valor -> "sob sigilo", nao "-"/"R$0"
+function fmtValor(r){var n=valNum(r);if(n!=null)return fmtBRL(n);return '<span title="o orgao nao divulgou o valor (orcamento sigiloso)" style="color:#9CA3AF">sob sigilo</span>';}
+// edital sem municipio (ex: Diario Oficial sem cidade) -> nao pode validar raio; rotular, nunca em branco
+function munT(r){var m=g(r,'MUNICIPIO');return m?esc(m):'<span title="fonte nao trouxe a cidade -- conferir manualmente" style="color:#B45309">sem localizacao</span>';}
 function diasAte(r){var dt=parseBR(g(r,'DATA SESSAO'));if(!dt)return null;var h=new Date();h.setHours(0,0,0,0);return Math.round((dt-h)/864e5);}
 function filialTxt(r){var f=g(r,'FILIAL PROXIMA');if(!f)return '';return '<span class="filnm" title="unidade Concrelagos que atende (usina=concreto, pedreira=brita)">'+esc(f)+'</span>';}
 var STCOR={'novo':'#6B7280','analisando':'#1565C0','vou dar lance':'#C28E2C','ganhamos':'#16A34A','perdemos':'#9CA3AF','descartado':'#DC2626'};
@@ -1036,7 +1040,7 @@ function linDet(r){
   return resumoHTML(r)+precoOrgaoHTML(r)+'<div class="det-box"><div>'
     +'<div class="dl">Objeto completo</div><div class="dv">'+esc(g(r,'OBJETO'))+'</div>'
     +'<div class="dl">Orgao</div><div class="dv">'+esc(g(r,'ORGAO'))+'</div></div><div>'
-    +'<div class="dl">Valor estimado</div><div class="dv">'+fmtBRL(v)+'</div>'
+    +'<div class="dl">Valor estimado</div><div class="dv">'+fmtValor(r)+'</div>'
     +'<div class="dl">Modalidade</div><div class="dv">'+(esc(g(r,'MODALIDADE'))||'-')+'</div>'
     +'<div class="dl">Numero</div><div class="dv">'+(esc(g(r,'NUMERO'))||'-')+'</div>'
     +'<div class="dl">Prazo</div><div class="dv">'+(d==null?'-':(d<0?'sessao ja passou':'faltam '+d+' dias'))+'</div>'
@@ -1070,9 +1074,9 @@ function renderTabela(){
       +'<td class="acts">'+actHTML(gi,r)+'</td>'
       +'<td><span class="sc2" style="background:'+scCor(s)+'">'+s+'</span></td>'
       +'<td style="white-space:nowrap">'+esc(g(r,'DATA SESSAO'))+' '+urgT(r)+nv+(isLido(r)?'<span class="selo">LIDO</span>':'')+statusBadge(r)+'</td>'
-      +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+esc(g(r,'MUNICIPIO'))+'</td>'
+      +'<td><span class="uf">'+esc(g(r,'UF'))+'</span></td><td>'+munT(r)+'</td>'
       +'<td class="org">'+esc(g(r,'ORGAO'))+'</td><td class="obj">'+esc(g(r,'OBJETO')).slice(0,110)+'</td>'
-      +'<td class="vlr">'+fmtBRL(valNum(r))+'</td>'
+      +'<td class="vlr">'+fmtValor(r)+'</td>'
       +'<td>'+esc(g(r,'FONTE'))+'</td><td>'+kmh+filialTxt(r)+'</td><td>'+bt+'</td></tr>';
     if(abertos[gi])h+='<tr class="det"><td colspan="12">'+linDet(r)+'</td></tr>';
   });
@@ -1100,7 +1104,7 @@ function renderCards(){
       +'<div class="ever"><b>Leitura automatica</b>'+esc(veredito(r))+'</div>'
       +'<div class="emeta">'
       +'<div><div class="k">Sessao</div><div class="v">'+esc(g(r,'DATA SESSAO'))+'</div></div>'
-      +'<div><div class="k">Cidade</div><div class="v">'+esc(g(r,'MUNICIPIO'))+'/'+esc(g(r,'UF'))+'</div></div>'
+      +'<div><div class="k">Cidade</div><div class="v">'+munT(r)+'/'+esc(g(r,'UF'))+'</div></div>'
       +'<div><div class="k">Orgao</div><div class="v">'+esc(g(r,'ORGAO')).slice(0,46)+'</div></div>'
       +'<div><div class="k">Valor est.</div><div class="v vlr">'+fmtBRL(v)+'</div></div>'
       +'<div><div class="k">Distancia</div><div class="v">'+(km==null?'-':'<span class="km '+kmCls(km)+'" title="'+esc(kmTip(r))+'">'+Math.round(km)+' km'+(r['DISTANCIA_ROTA_REAL']?'':'*')+'</span>')+filialTxt(r)+'</div></div>'
