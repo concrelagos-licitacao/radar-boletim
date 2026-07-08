@@ -608,6 +608,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .seg{display:inline-flex;border:1px solid #CDD2D8;border-radius:10px;overflow:hidden}
   .seg button{border:0;background:#fff;color:var(--primary);padding:8px 13px;font-size:.78rem;cursor:pointer;font-family:var(--disp);letter-spacing:.02em}
   .seg button.on{background:var(--ggold);color:#fff}
+  .calwrap{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+  .calhead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .calhead #calMes{font-family:var(--disp);font-size:.85rem;color:var(--ink);min-width:150px;text-align:center;letter-spacing:.02em}
+  .calhead button{border:1px solid var(--border);background:#fff;border-radius:7px;padding:4px 11px;cursor:pointer;font-size:.85rem;color:var(--primary)}
+  .calhead button:hover{background:var(--bg)}
+  .caltodos{margin-left:auto;color:var(--accent-d)!important;font-weight:600;font-size:.72rem!important}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .caldow{text-align:center;font-size:.64rem;color:var(--muted);padding:2px;font-weight:700;letter-spacing:.04em}
+  .calday{min-height:46px;border:1px solid var(--border);border-radius:6px;padding:2px 3px;background:#FAFBFC}
+  .calday.vazio{background:transparent;border:0}
+  .calday.hoje{background:var(--bege);border-color:var(--accent)}
+  .calday.sel{outline:2px solid var(--accent);outline-offset:-1px}
+  .calday .dn{color:var(--muted);font-size:.64rem;line-height:1.1}
+  .calchip{display:block;background:var(--primary);color:#fff;border-radius:5px;padding:2px 4px;margin-top:2px;font-size:.62rem;cursor:pointer;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+  .calchip.novo{background:var(--ok)}
+  .calchip:hover{filter:brightness(1.12)}
+  .calsel{margin-top:8px;font-size:.74rem;color:var(--primary);font-weight:600;display:none}
   .subtabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--border)}
   .subtab{border:0;background:transparent;color:var(--muted);padding:9px 18px;font-family:var(--disp);font-size:.76rem;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:color .15s}
   .subtab:hover{color:var(--primary)}
@@ -766,6 +783,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button class="subtab on" id="stLic">Licitacoes <span class="cnt" id="cLic">0</span></button>
           <button class="subtab" id="stAcc">Acompanhamentos <span class="cnt" id="cAcc">0</span></button>
         </div>
+        <div class="calwrap" id="calwrap">
+          <div class="calhead">
+            <button id="calPrev" title="mes anterior">&lsaquo;</button>
+            <span id="calMes">—</span>
+            <button id="calNext" title="proximo mes">&rsaquo;</button>
+            <button id="calTodos" class="caltodos">Ver todos os dias</button>
+          </div>
+          <div class="calgrid" id="calgrid"></div>
+          <div id="calsel" class="calsel"></div>
+        </div>
         <div class="filtros">
           <div class="fcol" style="flex:1"><label>Buscar (objeto, orgao, municipio, numero)</label><input id="busca" placeholder="Ex.: concreto usinado, brita, prefeitura..."></div>
           <div class="fcol"><label>UF</label><select id="fuf"><option value="">Todas</option></select></div>
@@ -887,6 +914,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 var DADOS=[],VIS=[],HOJE="{{HOJE}}",ordCol="score",ordDir=-1,CH={},MAP=null,LCAM=null,pg=0,PP=24,abertos={},soFav=false,ocultarLidos=false,verDesc=false,modo="tab",SEL={};
+var filtroDia='',CAL_MES=null;   // calendario: dia selecionado (YYYY-MM-DD) e mes exibido {y,m}
 function _ls(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
 var FAV=_ls('cl_fav'),LIDO=_ls('cl_lido'),DESC=_ls('cl_descartado');
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -970,10 +998,36 @@ function aplicar(){
     if(sit){var dt=parseBR(g(r,'DATA SESSAO'));if(sit==='ab'){if(!dt||dt<hoje)return false;}else{if(dt&&dt>=hoje)return false;}}
     if(stt){var s=(g(r,'STATUS')||'').trim();if(stt==='__sem'){if(s)return false;}else if(s!==stt)return false;}
     if(q){var b=(g(r,'OBJETO')+' '+g(r,'ORGAO')+' '+g(r,'MUNICIPIO')+' '+g(r,'NUMERO')+' '+g(r,'UF')).toLowerCase();if(b.indexOf(q)<0)return false;}
+    if(filtroDia&&(g(r,'capturado_em')||'').slice(0,10)!==filtroDia)return false;   // calendario: so o dia escolhido
     return true;
   });
   pg=0;abertos={};ordenar();render();kpis();graficos();destaque();mapa();
 }
+// ---- CALENDARIO por dia (igual ConLic): cada dia = o boletim capturado nele. Agrupa por
+// capturado_em (nao DATA SESSAO), entao o QD sem data entra certo. Clicar num dia filtra a lista. ----
+function capDia(r){return (g(r,'capturado_em')||'').slice(0,10);}
+function diasComEditais(){var m={};DADOS.forEach(function(r){var d=capDia(r);if(d)m[d]=(m[d]||0)+1;});return m;}
+function pad2(n){return (n<10?'0':'')+n;}
+function initCalMes(){var ds=Object.keys(diasComEditais()).sort();var last=ds[ds.length-1]||HOJE||'2026-01-01';var p=last.split('-');CAL_MES={y:+p[0],m:(+p[1])-1};}
+function renderCal(){
+  var g0=$('calgrid');if(!g0)return;if(!CAL_MES)initCalMes();
+  var mapa=diasComEditais(),y=CAL_MES.y,m=CAL_MES.m;
+  var meses=['Janeiro','Fevereiro','Marco','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  if($('calMes'))$('calMes').textContent=meses[m]+' '+y;
+  var start=new Date(y,m,1).getDay(),nd=new Date(y,m+1,0).getDate(),dow=['DOM','SEG','TER','QUA','QUI','SEX','SAB'],h='';
+  dow.forEach(function(d){h+='<div class="caldow">'+d+'</div>';});
+  for(var i=0;i<start;i++)h+='<div class="calday vazio"></div>';
+  for(var d=1;d<=nd;d++){
+    var iso=y+'-'+pad2(m+1)+'-'+pad2(d),n=mapa[iso]||0,novo=(iso===HOJE&&n)?' novo':'';
+    var cls='calday'+(iso===HOJE?' hoje':'')+(iso===filtroDia?' sel':'');
+    h+='<div class="'+cls+'"><div class="dn">'+d+'</div>'+(n?'<span class="calchip'+novo+'" data-dia="'+iso+'">'+n+(n>1?' editais':' edital')+'</span>':'')+'</div>';
+  }
+  g0.innerHTML=h;
+  g0.querySelectorAll('.calchip').forEach(function(ch){ch.addEventListener('click',function(){selDia(ch.getAttribute('data-dia'));});});
+}
+function selDia(iso){filtroDia=iso;var sel=$('calsel');if(sel){sel.style.display='block';sel.innerHTML='Boletim de <b>'+iso.split('-').reverse().join('/')+'</b> · <a href="#" id="calLimpa" style="color:var(--accent-d)">ver todos os dias</a>';}aplicar();renderCal();var lc=$('calLimpa');if(lc)lc.onclick=function(e){e.preventDefault();limpaDia();};}
+function limpaDia(){filtroDia='';var sel=$('calsel');if(sel)sel.style.display='none';aplicar();renderCal();}
+function calNav(delta){if(!CAL_MES)initCalMes();var mm=CAL_MES.m+delta,yy=CAL_MES.y;if(mm<0){mm=11;yy--;}if(mm>11){mm=0;yy++;}CAL_MES={y:yy,m:mm};renderCal();}
 
 function ordenar(){
   var c=ordCol,d=ordDir;
@@ -1394,6 +1448,10 @@ fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(funct
   // PNCP nao ve ate 2027. E o que o QD exaustivo por IBGE captura e o PNCP nao.
   var nDiario=DADOS.filter(function(x){return /diario/i.test(g(x,'FONTE'));}).length;
   if($('kDiario')){$('kDiario').textContent=nDiario;if(nDiario&&$('radarnum'))$('radarnum').style.display='block';}
+  renderCal();
+  if($('calPrev'))$('calPrev').onclick=function(){calNav(-1);};
+  if($('calNext'))$('calNext').onclick=function(){calNav(1);};
+  if($('calTodos'))$('calTodos').onclick=function(){limpaDia();};
   popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
   $('load').style.display='none';$('app').style.display='block';
