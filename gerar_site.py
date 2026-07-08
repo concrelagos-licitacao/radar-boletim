@@ -863,6 +863,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="hgrid">
         <div class="panel"><div class="clhead"><span class="ht">Top clientes por volume</span><span class="hs">m3 contratados (historico)</span></div><div id="htop"></div></div>
         <div class="panel"><div class="clhead"><span class="ht">Contratos a vencer (90 dias)</span><span class="hs">hora de buscar a proxima ata</span></div><div id="hvencer"></div></div>
+        <div class="panel"><div class="clhead"><span class="ht">Re-licitacoes previstas</span><span class="hs">orgaos que compram ~todo ano e ainda nao licitaram</span></div><div id="hprev"></div></div>
       </div>
       <div class="panel">
         <div class="clhead"><span class="ht">Arquivo de editais</span><span class="hs">todos os editais ja captados pelo radar, acumulados</span></div>
@@ -1321,6 +1322,11 @@ function renderHistBI(){
     $('htop').innerHTML=th||'<div style="color:#9CA3AF;padding:10px">Sem dados de pregoes.</div>';
     var vh='';(h.vencer_90d||[]).forEach(function(v){var cor=v.dias<=15?'#DC2626':v.dias<=45?'#E08A00':'#16A34A';vh+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'<br><small>'+relicStatus(v)+'</small></span><span class="mt"><span class="dbadge" style="background:'+cor+'">'+v.dias+'d</span> '+esc((v.validade||'').split('-').reverse().join('/'))+(v.valor?'<br><small style="color:#6B7280">R$ '+fcomp(v.valor)+'</small>':'')+'</span></div>';});
     $('hvencer').innerHTML=(vh?'<div style="color:#9CA3AF;font-size:.72rem;padding:2px 10px 8px">Contratos NOSSOS vencendo — provavel re-licitacao. Confirme se nao foi renovado antes de agir.</div>'+vh:'<div style="color:#9CA3AF;padding:10px">Nenhum contrato vencendo em 90 dias.</div>');
+    var ph='';(h.relicitacao_prevista||[]).forEach(function(v){
+      var mun=mnorm(v.municipio||v.cliente),jaRadar=DADOS.some(function(r){return mnorm(g(r,'MUNICIPIO'))===mun;});
+      var st=jaRadar?'<span style="color:#16A34A;font-weight:700">&#10003; ja no radar</span>':'<span style="color:#B45309">estimativa — confirme</span>';
+      ph+='<div class="hrow"><span class="nm" title="'+esc(v.cliente)+'">'+esc(v.cliente)+'<br><small>'+st+'</small></span><span class="mt"><span class="dbadge" style="background:#6366F1">~'+v.cadencia_anos+'a</span> ultima '+v.ultimo_ano+(v.preco_med?'<br><small style="color:#6B7280">R$ '+fnum(v.preco_med)+'/m³</small>':'')+'</span></div>';});
+    $('hprev').innerHTML=(ph?'<div style="color:#9CA3AF;font-size:.72rem;padding:2px 10px 8px">Compram ~todo ano mas ainda nao licitaram este ano. Estimativa por cadencia — confirme na fonte.</div>'+ph:'<div style="color:#9CA3AF;padding:10px">Nenhuma re-licitacao prevista por cadencia.</div>');
   });
 }
 function renderHist(){
@@ -1749,6 +1755,29 @@ def gerar_historico_json():
             'ultimo_ano': max(d['anos']) if d['anos'] else '',
         }
 
+    # MOTOR PREDITIVO por CADENCIA (conselho, ordem #2): orgao que compra REGULARMENTE (~todo ano)
+    # e ainda NAO licitou este ano -> provavel re-licitacao. Complementa o vencer_90d (que e preciso,
+    # por validade de contrato). Dado por ANO = grosso -> rotulado "estimativa", so n>=3 anos distintos
+    # e cadencia <=1.6 ano (comprador regular). Sem falso-alarme cravado -- e um lembrete p/ conferir.
+    try:
+        ano_atual = int(_hoje_brt()[:4])
+    except Exception:
+        ano_atual = 2026
+    relic_prev = []
+    for mk, d in orgao_ag.items():
+        anos_d = sorted(set(int(a) for a in d.get('anos', []) if str(a).isdigit()))
+        if len(anos_d) < 3:
+            continue
+        ints = [anos_d[i + 1] - anos_d[i] for i in range(len(anos_d) - 1)]
+        cad = (sum(ints) / len(ints)) if ints else 99
+        ultimo = anos_d[-1]
+        if cad <= 1.6 and ultimo < ano_atual:              # compra ~todo ano e ainda nao comprou este ano
+            ps = sorted(p for p in d['precos'] if 40 <= p <= 2000)
+            relic_prev.append({'cliente': d['cliente'], 'municipio': mk, 'n': d['n'],
+                               'ultimo_ano': ultimo, 'cadencia_anos': round(cad, 1),
+                               'atraso_anos': ano_atual - ultimo, 'preco_med': _pct(ps, 0.5)})
+    relic_prev.sort(key=lambda x: (-x['atraso_anos'], -x['n']))
+
     # lista enxuta p/ tabela (ordena por ano desc, cliente)
     def _ord(r):
         return (r['ano'] or '0', r['cliente'])
@@ -1760,6 +1789,7 @@ def gerar_historico_json():
         'gerado': _hoje_brt(),
         'total_pregoes': len(preg), 'total_ganhas': len(ganhas), 'total_aditivos': len(adit),
         'por_ano': anos, 'top_clientes': top_cli, 'vencer_90d': vencer,
+        'relicitacao_prevista': relic_prev,
         'preco': resumo_preco, 'precos_por_orgao': precos_por_orgao, 'registros': lista,
     }
     with open(os.path.join(DOCS, 'historico.json'), 'w', encoding='utf-8') as f:
