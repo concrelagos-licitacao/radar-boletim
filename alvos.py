@@ -15,6 +15,7 @@ import csv
 import json
 import math
 import os
+import re
 import unicodedata
 
 import gspread
@@ -27,6 +28,23 @@ ANO_ATIVO = os.environ.get('ANO_ATIVO', '2024')   # comprou deste ano p/ frente 
 
 def _n(s):
     return ' '.join(unicodedata.normalize('NFKD', str(s or '')).encode('ascii', 'ignore').decode().lower().split())
+
+
+def _limpa_orgao(nome):
+    """Extrai um candidato a MUNICIPIO do nome de um orgao (prefeitura/secretaria/autarquia/etc).
+    Conservador: usado so p/ tentar casar EXATO contra a base IBGE -- se limpar demais e nao casar,
+    o alvo apenas fica sem UF (fail-open, sem regressao)."""
+    t = _n(nome)
+    t = re.sub(r'\(.*?\)', ' ', t)                                    # parenteticos
+    t = re.sub(r'\bestado\s+(do|de|da)?\s*[a-z]{2}\b', ' ', t)        # 'estado rj'
+    t = re.sub(r'\b(prefeitura|municipio|camara|fundo|fundacao|instituto|autarquia|departamento|'
+               r'secretaria|subprefeitura|servicos?|superintendencia|companhia|consorcio|agencia|'
+               r'diretoria|divisao|coordenadoria|gabinete|poder|executivo|legislativo)\b', ' ', t)
+    t = re.sub(r'\b(municipal|municipais|estadual|publicas?|de gestao|de processos|de licitacoes?|'
+               r'de compras|de obras|de saude|de educacao|de administracao|de fazenda)\b', ' ', t)
+    t = re.sub(r'\s*[-/]\s*[a-z]{2}\b', ' ', t)                       # sufixo -UF ou /UF
+    t = re.sub(r'\b(do|da|de|dos|das|e)\b', ' ', t)
+    return ' '.join(t.split())
 
 
 def _hav(a, b):
@@ -113,6 +131,23 @@ def main():
             'atende': 'concreto' if no_raio_concreto else 'brita',
             'prioridade': 2, 'incumbente': False,
         }
+
+    # Backfill dos P1 sem UF (~31%): orgao que nao e nome de municipio (autarquia/secretaria). Limpa o
+    # nome e casa EXATO contra a base IBGE. So preenche campos hoje nulos (fail-open: sem match, fica None).
+    idx = {m['nome_norm']: m for m in muns}
+    for v in p1.values():
+        if v.get('uf') is not None:
+            v['georreferenciado'] = True
+            continue
+        m = idx.get(_limpa_orgao(v.get('municipio', '')))
+        if m:
+            d = min((_hav((m['lat'], m['lon']), (u[0], u[1])) for u in usinas), default=9e9)
+            v['uf'] = m['uf']
+            v['codigo_ibge'] = m.get('codigo_ibge', '')
+            v['dist_usina_km'] = round(d, 1) if d <= RAIO_USINA_KM else None
+            v['georreferenciado'] = True
+        else:
+            v['georreferenciado'] = False
 
     out = {
         'gerado_por': 'alvos.py',

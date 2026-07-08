@@ -50,6 +50,18 @@ def score(texto):
     return 0                                         # "concreto" sem contexto / obra generica -> descarta
 def rel(t):
     return score(t) >= 2                             # mantem so CERTO + PROVAVEL (corta o ruido)
+# brita subset de KW3 (o resto de KW3 = concreto-usinado forte). Usado SO no caminho PNCP p/ mandar
+# 'brita + contexto de berco/tubo' pro item-check em vez de aceitar direto pelo objeto -- o score() casa
+# 'brita' (KW3) ANTES do EXCL, entao 'brita p/ assentamento de tubo' passaria. NAO mexe no score()/rel()
+# global de proposito: Licitar/QD usam o mesmo gate e NAO tem rede de item-check (rebaixar la = MISS).
+KW3_BRITA = ('brita', 'britas', 'brita graduada', 'bgs', 'brita 0', 'brita 1', 'brita 2', 'brita 3',
+             'brita 4', 'brita corrida', 'pedra britada', 'pedras britadas', 'pedrisco', 'po de pedra',
+             'bica corrida', 'rachao', 'racho', 'pedregulho de cava', 'pedregulho lavado', 'cascalho',
+             'agregado graudo', 'agregados graudos', 'pedra de mao', 'pedra marroada', 'seixo')
+def _so_brita_com_excl(o):
+    t = _n(o)
+    return (any(k in t for k in KW3_BRITA) and not any(k in t for k in KW3 if k not in KW3_BRITA)
+            and any(e in t for e in EXCL))
 def norm(s):
     return re.sub(r'\s+', ' ', unicodedata.normalize('NFKD', str(s or '')).encode('ascii', 'ignore').decode().upper().strip())
 def iso(s):
@@ -464,6 +476,8 @@ def coleta_pncp():
                     if nc: seen.add(nc)
                     objeto = d.get('objetoCompra') or ''
                     aceito = rel(objeto)
+                    if aceito and _so_brita_com_excl(objeto):
+                        aceito = False              # brita + contexto de berco/tubo -> confirma no item-check, nao aceita pelo objeto
                     # pendente = objeto descartado hoje, MAS de familia-construcao (pode esconder
                     # linha de usinado). So confirma abrindo os itens DEPOIS, e so se ficar no raio.
                     pendente = (not aceito) and PNCP_ITENS and _familia_construcao(objeto)
@@ -543,6 +557,8 @@ def coleta_pncp_search():
                     seen.add(nc)
                     objeto = it.get('description') or it.get('title') or ''
                     aceito = rel(objeto)
+                    if aceito and _so_brita_com_excl(objeto):
+                        aceito = False              # brita + contexto de berco/tubo -> item-check (mesmo gate do consulta)
                     pendente = (not aceito) and PNCP_ITENS and _familia_construcao(objeto)
                     if not aceito and not pendente: continue
                     registros.append({'fonte': 'PNCP', 'uf': it.get('uf', uf),
