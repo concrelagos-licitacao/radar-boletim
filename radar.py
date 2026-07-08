@@ -590,11 +590,17 @@ for f in ('PNCP', 'LICITAR_DIGITAL', 'QUERIDO_DIARIO'):
 if PNCP_TRUNC: alertas.append("PNCP TRUNCOU (dados incompletos): " + ", ".join(PNCP_TRUNC))
 alerta_txt = " | ".join(alertas) if alertas else "OK - todas as fontes saudaveis"
 
-# log de saude (append) -> baseline pra proxima rodada (compara RAW = a fonte respondeu?)
-if not prev:
-    ws_saude.append_row(['QUANDO', 'TOTAL_UNICO', 'RAW_POR_FONTE(json)', 'POR_UF(json)', 'PNCP_raw', 'LICITAR_raw', 'QD_raw', 'TRUNCOU', 'ALERTA'])
+# log de saude -> baseline pra proxima rodada (compara RAW = a fonte respondeu?).
+# BUG corrigido 2026-07-07: append_row SEM table_range deslizava as colunas a cada rodada ->
+# aba sem cabecalho, dados espalhados a direita -> diario.json lia vazio e o health-check ficava
+# CEGO justo quando devia gritar. Fix: (1) auto-reparo do cabecalho; (2) append ancorado em 'A1'.
+HDR_SAUDE = ['QUANDO', 'TOTAL_UNICO', 'RAW_POR_FONTE(json)', 'POR_UF(json)', 'PNCP_raw', 'LICITAR_raw', 'QD_raw', 'TRUNCOU', 'ALERTA']
+if (not prev) or (not prev[0]) or (prev[0][0].strip().upper() != 'QUANDO'):
+    ws_saude.clear()                                  # cabecalho ausente/corrompido -> reescreve limpo
+    ws_saude.update(values=[HDR_SAUDE], range_name='A1')
 ws_saude.append_row([AGORA, len(final), json.dumps(raw), json.dumps(poruf),
-                     c_pncp, c_lic, c_qd, ", ".join(PNCP_TRUNC), alerta_txt])
+                     c_pncp, c_lic, c_qd, ", ".join(PNCP_TRUNC), alerta_txt],
+                    table_range='A1', value_input_option='USER_ENTERED')   # ancora em A1 -> nao desliza
 
 # ---------- enriquece com distancia geo + REGRA DE RAIO (concreto<=70km usina, brita<=300km pedreira) ----------
 if filiais:

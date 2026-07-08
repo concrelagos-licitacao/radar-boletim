@@ -74,13 +74,29 @@ jobs:
           MOSTRAR_FILIAIS: '1'   # mapa mostra usinas/pedreiras (usuario pediu; site tem noindex)
         run: python gerar_site.py
 
+      # watchlist priorizada + captura medida vs ConLic (consumidos pelo painel "Radar em numeros").
+      # `|| echo`: se falharem, o site usa os JSON commitados anteriores -- nao bloqueia.
+      - name: Gerar alvos + vazamento
+        if: success()
+        env:
+          GOOGLE_SHEETS_CREDENTIALS_PATH: ./credenciais/service_account.json
+        run: |
+          python alvos.py || echo "alvos falhou (usa o anterior)"
+          python vazamento.py || echo "vazamento falhou (usa o anterior)"
+
       - name: Limpar credenciais
         if: always()
         run: rm -f credenciais/service_account.json
+
+      # Guardrail: se a geracao produziu site/JSON quebrado, ABORTA antes do commit (sem `|| echo`:
+      # este PRECISA derrubar o job pra nao publicar site quebrado que a diretoria abriria).
+      - name: Smoke-test do site (bloqueia commit se quebrou)
+        if: success()
+        run: python smoke_test.py
 
       - name: Commit do site
         if: success()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(site): atualiza boletins [skip ci]"
-          file_pattern: 'docs/ cache_rotas.json radar_estado.json'
+          file_pattern: 'docs/ cache_rotas.json radar_estado.json municipios_br.csv'

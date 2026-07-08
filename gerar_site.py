@@ -737,6 +737,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="card kclic" data-kpi="prox"><div class="lbl">Mais proximo</div><div class="val" id="kMin">-</div><div class="sub" id="kMinL">ordenar por distancia →</div></div>
         <div class="card kclic" data-kpi="fav"><div class="lbl">Acompanhando</div><div class="val" id="kFav">-</div><div class="sub">ver acompanhados →</div></div>
       </div>
+      <div class="panel" id="radarnum" style="display:none">
+        <div class="clhead"><span class="ht">Radar em numeros</span><span class="hs">alvos monitorados + cobertura medida vs ConLicitacao</span></div>
+        <div class="cards" style="padding:6px 0">
+          <div class="card"><div class="lbl">Alvos prioritarios</div><div class="val" id="kAlvo">-</div><div class="sub">orgaos que ja fornecemos</div></div>
+          <div class="card"><div class="lbl">Cidades no raio</div><div class="val" id="kRaio">-</div><div class="sub">cobertura obrigatoria</div></div>
+          <div class="card"><div class="lbl">Captura vs ConLic</div><div class="val" id="kCap">-</div><div class="sub" id="kCapL">medido no backtest</div></div>
+        </div>
+      </div>
       <div class="graficos">
         <div class="gbox"><h4>Editais por estado (UF)</h4><div class="gwrap"><canvas id="cUf"></canvas></div></div>
         <div class="gbox"><h4>Por fonte</h4><div class="gwrap"><canvas id="cFonte"></canvas></div></div>
@@ -1340,15 +1348,33 @@ checkFrescor();
 // Nunca mente por omissao -- lista curta por falha de coleta != "nao tem edital".
 function checkSaude(){
   fetch('diario.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.length)return;var ult=d[0],al=String(ult.alerta||'');
-    if(/OK/i.test(al.slice(0,6)))return;                       // "OK - todas as fontes saudaveis"
-    if(!/ALERTA|TRUNC|DESPENC|COLETOU 0|FONTE/i.test(al))return;
+    if(!d||!d.length)return;var ult=d[0],al=String(ult.alerta||'').trim();
+    // INVERTIDO (conselho): so fica quieto se o alerta comeca explicitamente com "OK". Qualquer
+    // outra coisa -- inclusive VAZIO numa linha real -- e suspeito e grita. Ausencia de "OK" != saudavel.
+    if(/^OK/i.test(al))return;
     var el=$('saude');if(!el)return;el.style.display='block';el.className='saude-erro';
-    el.innerHTML='&#9888; A ultima coleta ('+esc(ult.quando)+') teve problema: '+esc(al.slice(0,150))
-      +'. Alguns editais podem estar faltando hoje — confira direto na fonte antes de concluir que nao ha licitacao.';
+    el.innerHTML='&#9888; A ultima coleta ('+esc(ult.quando||'?')+') pode ter tido problema'
+      +(al?': '+esc(al.slice(0,150)):' (sem confirmacao de saude)')
+      +'. Alguns editais podem estar faltando — confira direto na fonte antes de concluir que nao ha licitacao.';
   }).catch(function(){});
 }
 checkSaude();
+// Radar em numeros: consome alvos.json (watchlist) + vazamento.json (captura medida vs ConLic).
+// Sem isso os dois JSON seriam output morto (furo do conselho). Falha graciosa se faltarem.
+function carregaRadarNum(){
+  var pane=$('radarnum'),got=false;
+  fetch('alvos.json?v='+Date.now()).then(function(r){return r.json();}).then(function(a){
+    if(a){if($('kAlvo'))$('kAlvo').textContent=(a.total_p1_incumbentes||0)+(a.p1_ativos?' ('+a.p1_ativos+' ativos)':'');
+      if($('kRaio'))$('kRaio').textContent=(a.total_p2_raio||0)+((a.total_p1_incumbentes)?'+'+a.total_p1_incumbentes:'');
+      got=true;if(pane)pane.style.display='block';}
+  }).catch(function(){});
+  fetch('vazamento.json?v='+Date.now()).then(function(r){return r.json();}).then(function(v){
+    if(v&&$('kCap')){var t=v.taxa_captura_pct;$('kCap').textContent=(t==null?'—':t+'%');
+      if($('kCapL'))$('kCapL').textContent=(v.no_raio?('de '+v.capturados_no_raio+'/'+v.no_raio+' no raio'):'medido no backtest');
+      if(pane)pane.style.display='block';}
+  }).catch(function(){});
+}
+carregaRadarNum();
 fetch('dados.json?v='+Date.now()).then(function(r){return r.json();}).then(function(d){
   DADOS=d||[];$('load').style.display='none';$('app').style.display='block';popular();popularMes();lerURL();if(soFav){$('stAcc').classList.add('on');$('stLic').classList.remove('on');}aplicar();carregaHist(function(){if(Object.keys(PRECOS_ORGAO).length)render();});
 }).catch(function(){
