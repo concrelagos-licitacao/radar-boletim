@@ -619,8 +619,19 @@ print("PNCP:", c_pncp, "| Querido Diario:", c_qd, "| Licitar Digital:", c_lic)
 # precedencia: PNCP (origem legal) > Licitar > Querido Diario
 ordem = {'PNCP': 0, 'LICITAR_DIGITAL': 1, 'QUERIDO_DIARIO': 2}
 registros.sort(key=lambda x: ordem.get(x['fonte'], 9))
+# DEDUP QD x PNCP por MUNICIPIO (conselho unanime 2026-07-08): o dedup por texto exato NUNCA casa
+# o QD "texto solto" (excerpt do diario) com o objeto estruturado do PNCP -> quando o PNCP voltar
+# (hoje deu 0), o MESMO municipio apareceria 2x (1 PNCP + 1 QD) = boletim duplicado, mata a
+# credibilidade do veredito. Regra: o QD so vale onde o PNCP NAO viu (municipio sem edital PNCP) --
+# que e justamente o valor do QD (interior <20k que o PNCP nao cobre ate 2027). Onde ha PNCP, ele
+# e a fonte autoritativa; o QD daquele municipio e descartado.
+mun_pncp = set(_n(r.get('municipio', '')) for r in registros
+               if r.get('fonte') == 'PNCP' and r.get('municipio'))
 vistos_uid, vistos_txt, mirror, final = set(), set(), {}, []
+n_qd_sup = 0
 for r in registros:
+    if r.get('fonte') == 'QUERIDO_DIARIO' and _n(r.get('municipio', '')) in mun_pncp:
+        n_qd_sup += 1; continue                            # PNCP ja cobre esse municipio -> nao duplica
     uid = r.get('uid') or ''
     if uid and uid in vistos_uid: continue                 # mesma fonte relistando o mesmo edital
     ob = norm(r['objeto'])
@@ -634,7 +645,8 @@ for r in registros:
     final.append(r)
 # so editais ainda disputaveis: sessao vazia (QD) ou hoje em diante
 final = [r for r in final if (not r.get('data_sessao')) or r['data_sessao'] >= HOJE_ISO]
-print("Total bruto:", len(registros), "| apos dedup+recencia:", len(final))
+print("Total bruto:", len(registros), "| apos dedup+recencia:", len(final),
+      "| QD suprimido (municipio ja no PNCP):", n_qd_sup)
 
 porfonte = {}
 for r in final: porfonte[r['fonte']] = porfonte.get(r['fonte'], 0) + 1
