@@ -211,11 +211,11 @@
         <div class="ti">CONCRELAG<svg class="sol" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="#C28E2C"><circle cx="12" cy="12" r="5"/><g stroke="#C28E2C" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4" y1="4" x2="6" y2="6"/><line x1="18" y1="18" x2="20" y2="20"/><line x1="4" y1="20" x2="6" y2="18"/><line x1="18" y1="6" x2="20" y2="4"/></g></g></svg>S&nbsp;<span style="letter-spacing:.05em">INTELLIGENCE HUB</span></div>
         <div class="s">Radar de licitacoes de concreto &amp; brita (Pregao Eletronico) + precificacao por orgao · fontes: PNCP, Diario Oficial e Licitar Digital</div>
       </div>
-      <div class="updated">Ultima varredura<br><b>08/07/2026 11:28</b></div>
+      <div class="updated">Ultima varredura<br><b>08/07/2026 11:45</b></div>
     </div>
 
     <div id="erro"></div>
-    <div id="frescor" data-gerado="2026-07-08T11:28:24" style="display:none"></div>
+    <div id="frescor" data-gerado="2026-07-08T11:45:47" style="display:none"></div>
     <div id="saude" style="display:none"></div>
 
     <div class="tabbar">
@@ -463,6 +463,7 @@ function aplicar(){
   $('kmval').textContent=(kmMax>=1000?'qualquer':kmMax+' km');
   var hoje=new Date();hoje.setHours(0,0,0,0);
   VIS=DADOS.filter(function(r){
+    if(r['FORA_RAIO_REAL']===true||g(r,'FORA_RAIO_REAL')==='True')return false;   // > 70/400km REAL: fica na historia (dados.json), fora do boletim
     if(isDesc(r)&&!verDesc)return false;          // descartado some (toggle 've descartados')
     if(verDesc&&!isDesc(r))return false;          // modo 've descartados' mostra so os descartados
     if(ocultarLidos&&isLido(r))return false;
@@ -483,7 +484,7 @@ function aplicar(){
 // ---- CALENDARIO por dia (igual ConLic): cada dia = o boletim capturado nele. Agrupa por
 // capturado_em (nao DATA SESSAO), entao o QD sem data entra certo. Clicar num dia filtra a lista. ----
 function capDia(r){return (g(r,'capturado_em')||'').slice(0,10);}
-function diasComEditais(){var m={};DADOS.forEach(function(r){var d=capDia(r);if(d)m[d]=(m[d]||0)+1;});return m;}
+function diasComEditais(){var m={};DADOS.forEach(function(r){if(r['FORA_RAIO_REAL']===true||g(r,'FORA_RAIO_REAL')==='True')return;var d=capDia(r);if(d)m[d]=(m[d]||0)+1;});return m;}
 function pad2(n){return (n<10?'0':'')+n;}
 function initCalMes(){var ds=Object.keys(diasComEditais()).sort();var last=ds[ds.length-1]||HOJE||'2026-01-01';var p=last.split('-');CAL_MES={y:+p[0],m:(+p[1])-1};}
 function renderCal(){
